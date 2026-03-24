@@ -1,0 +1,814 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+
+const kv = env.KV as KVNamespace;
+
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) return Astro.redirect('/admin/login');
+---
+
+<AdminLayout title="Assets - Admin">
+  <!-- Tabs -->
+  <div class="tabs" id="asset-tabs">
+    <button class="tab active" data-tab="cv-pages">CV Pages</button>
+    <button class="tab" data-tab="files">Proof Files</button>
+  </div>
+
+  <!-- Tab 1: CV Pages -->
+  <div id="panel-cv-pages" class="tab-panel">
+    <div class="admin-card">
+      <div class="panel-header">
+        <h2>CV Page Assets</h2>
+      </div>
+      <div id="assets-list">Loading...</div>
+    </div>
+
+    <!-- Inline editor (hidden by default) -->
+    <div id="asset-editor" class="hidden">
+      <div class="admin-card">
+        <div class="editor-top">
+          <div>
+            <h2 id="editor-title">Edit Asset</h2>
+            <div class="editor-meta">
+              <div class="form-group form-inline">
+                <label>Name</label>
+                <input type="text" id="editor-label" />
+              </div>
+              <div class="form-group form-inline">
+                <label>Theme</label>
+                <span id="editor-theme-display" class="badge badge-info"></span>
+              </div>
+            </div>
+          </div>
+          <div class="editor-actions">
+            <button class="btn btn-secondary" id="import-rxresume">Import RxResume</button>
+            <input type="file" id="rxresume-file" accept=".json" style="display:none" />
+            <button class="btn btn-secondary" id="editor-cancel">Cancel</button>
+            <button class="btn btn-primary" id="editor-save">Save</button>
+            <span id="editor-status" class="status-msg"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="editor-layout">
+        <div class="editor-panel">
+          <div class="admin-card">
+            <div class="section-tabs" id="section-tabs">
+              <button class="tab active" data-section="header">Header</button>
+              <button class="tab" data-section="experience">Experience</button>
+              <button class="tab" data-section="education">Education</button>
+              <button class="tab" data-section="skills">Skills</button>
+              <button class="tab" data-section="projects">Projects</button>
+              <button class="tab" data-section="json">Raw JSON</button>
+            </div>
+
+            <!-- Header section -->
+            <div class="section-panel" id="panel-header">
+              <div class="form-group"><label>Name</label><input type="text" id="cv-name" placeholder="Your Name" /></div>
+              <div class="form-group"><label>Title</label><input type="text" id="cv-title" placeholder="Software Engineer" /></div>
+              <div class="form-group"><label>Summary</label><textarea id="cv-summary" rows="3" placeholder="Brief introduction..."></textarea></div>
+              <div class="form-group"><label>Avatar URL</label><input type="text" id="cv-avatar" placeholder="https://..." /></div>
+              <div class="form-group"><label>Links (one per line: label|url)</label><textarea id="cv-links" rows="3" placeholder="GitHub|https://github.com/you"></textarea></div>
+              <div class="form-group"><label>Page Title</label><input type="text" id="cv-meta-title" placeholder="My CV" /></div>
+              <div class="form-group"><label>Language</label><select id="cv-meta-lang"><option value="en">English (en)</option></select></div>
+            </div>
+
+            <!-- Experience -->
+            <div class="section-panel hidden" id="panel-experience">
+              <div id="experience-items"></div>
+              <button class="btn btn-secondary" id="add-experience">+ Add Experience</button>
+            </div>
+
+            <!-- Education -->
+            <div class="section-panel hidden" id="panel-education">
+              <div id="education-items"></div>
+              <button class="btn btn-secondary" id="add-education">+ Add Education</button>
+            </div>
+
+            <!-- Skills -->
+            <div class="section-panel hidden" id="panel-skills">
+              <div id="skills-items"></div>
+              <button class="btn btn-secondary" id="add-skill-category">+ Add Category</button>
+            </div>
+
+            <!-- Projects -->
+            <div class="section-panel hidden" id="panel-projects">
+              <div id="project-items"></div>
+              <button class="btn btn-secondary" id="add-project">+ Add Project</button>
+            </div>
+
+            <!-- Raw JSON -->
+            <div class="section-panel hidden" id="panel-json">
+              <textarea id="cv-json" rows="30" style="font-family:monospace;font-size:0.8rem;"></textarea>
+              <button class="btn btn-secondary" id="apply-json" style="margin-top:0.5rem;">Apply JSON</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="preview-panel">
+          <div class="admin-card">
+            <div class="preview-header">
+              <h2>Preview</h2>
+              <button class="btn btn-secondary btn-sm" id="preview-refresh">Refresh</button>
+            </div>
+            <iframe id="preview-frame" style="width:100%;height:600px;border:1px solid var(--admin-border);border-radius:var(--admin-radius);background:white;"></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 2: Proof Files -->
+  <div id="panel-files" class="tab-panel hidden">
+    <div class="admin-card">
+      <h2>Upload Document</h2>
+      <form id="upload-form" enctype="multipart/form-data">
+        <div class="form-group">
+          <label for="file-input">Choose files (PDF recommended)</label>
+          <input type="file" id="file-input" name="file" accept=".pdf,.doc,.docx,.png,.jpg" multiple />
+        </div>
+        <button type="submit" class="btn btn-primary">Upload</button>
+        <span id="upload-status" class="status-msg"></span>
+      </form>
+    </div>
+    <div class="admin-card">
+      <h2>Stored Files</h2>
+      <div id="file-list">Loading...</div>
+    </div>
+  </div>
+</AdminLayout>
+
+<script>
+  // ========== State ==========
+  interface AssetRow {
+    asset_id: string;
+    label: string;
+    theme_name: string;
+    cv_data: string;
+    is_default: number;
+    created_at: string;
+    updated_at: string;
+  }
+
+  let assets: AssetRow[] = [];
+  let editingAssetId: string | null = null;
+  let cvData: any = {};
+  let themeConfigs: Record<string, any> = {};
+
+  // ========== Tab switching ==========
+  document.getElementById('asset-tabs')?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('.tab') as HTMLElement;
+    if (!btn) return;
+    const tab = btn.dataset.tab!;
+
+    document.querySelectorAll('#asset-tabs .tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+    document.getElementById(`panel-${tab}`)?.classList.remove('hidden');
+
+    if (tab === 'files') loadFiles();
+  });
+
+  // ========== CV Pages Tab ==========
+  async function loadAssets() {
+    const container = document.getElementById('assets-list')!;
+    try {
+      const [assetsRes, themeRes] = await Promise.all([
+        fetch('/api/admin/assets', { credentials: 'include' }),
+        fetch('/api/admin/theme', { credentials: 'include' }),
+      ]);
+      const assetsData = await assetsRes.json();
+      const themeData = await themeRes.json();
+
+      if (!assetsData.ok) { container.innerHTML = 'Failed to load'; return; }
+
+      assets = assetsData.data.assets || [];
+      themeConfigs = themeData.data?.configs || {};
+
+      renderAssetsList();
+    } catch {
+      container.innerHTML = 'Error loading assets';
+    }
+  }
+
+  function renderAssetsList() {
+    const container = document.getElementById('assets-list')!;
+    if (assets.length === 0) {
+      container.innerHTML = '<p style="color:var(--admin-text-secondary)">No assets yet. Create one from the Themes page.</p>';
+      return;
+    }
+
+    container.innerHTML = `
+      <table>
+        <thead><tr>
+          <th>Name</th><th>Theme</th><th>Updated</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody>
+          ${assets.map(a => `
+            <tr>
+              <td><strong>${esc(a.label)}</strong></td>
+              <td><span class="badge badge-info">${esc(a.theme_name)}</span></td>
+              <td>${new Date(a.updated_at).toLocaleDateString()}</td>
+              <td>${a.is_default ? '<span class="badge badge-warning">Default</span>' : ''}</td>
+              <td class="action-cell">
+                <button class="btn btn-primary btn-sm" onclick="editAsset('${a.asset_id}')">Edit</button>
+                <button class="btn btn-secondary btn-sm" onclick="duplicateAsset('${a.asset_id}')">Duplicate</button>
+                ${!a.is_default ? `<button class="btn btn-secondary btn-sm" onclick="setDefault('${a.asset_id}')">Set Default</button>` : ''}
+                ${!a.is_default ? `<button class="btn btn-danger btn-sm" onclick="deleteAsset('${a.asset_id}')">Delete</button>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  function esc(s: string) {
+    const el = document.createElement('span');
+    el.textContent = s;
+    return el.innerHTML;
+  }
+
+  // ========== Asset CRUD ==========
+  async function editAsset(id: string) {
+    const asset = assets.find(a => a.asset_id === id);
+    if (!asset) return;
+
+    editingAssetId = id;
+    try {
+      cvData = JSON.parse(asset.cv_data);
+    } catch {
+      cvData = { meta: { title: 'My CV', lang: 'en' }, header: { name: '', title: '', summary: '', links: [] }, experience: [], education: [], skills: [], projects: [] };
+    }
+
+    document.getElementById('editor-title')!.textContent = `Edit: ${asset.label}`;
+    (document.getElementById('editor-label') as HTMLInputElement).value = asset.label;
+    document.getElementById('editor-theme-display')!.textContent = asset.theme_name;
+
+    populateLanguageDropdown(asset.theme_name, cvData.meta?.lang);
+
+    renderForm();
+    updatePreview();
+
+    document.getElementById('assets-list')!.parentElement!.classList.add('hidden');
+    document.getElementById('asset-editor')!.classList.remove('hidden');
+  }
+
+  function closeEditor() {
+    editingAssetId = null;
+    document.getElementById('asset-editor')!.classList.add('hidden');
+    document.getElementById('assets-list')!.parentElement!.classList.remove('hidden');
+    loadAssets();
+  }
+
+  async function saveAsset() {
+    if (!editingAssetId) return;
+    collectFormData();
+
+    const asset = assets.find(x => x.asset_id === editingAssetId);
+    if (!asset) return;
+
+    const label = (document.getElementById('editor-label') as HTMLInputElement).value.trim();
+    const status = document.getElementById('editor-status')!;
+
+    status.textContent = 'Saving...';
+    status.className = 'status-msg';
+
+    try {
+      const res = await fetch('/api/admin/assets', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          asset_id: editingAssetId,
+          label,
+          cv_data: JSON.stringify(cvData),
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        status.textContent = 'Saved!';
+        status.className = 'status-msg success';
+        updatePreview();
+        asset.label = label;
+        asset.cv_data = JSON.stringify(cvData);
+      } else {
+        status.textContent = data.error || 'Failed';
+        status.className = 'status-msg error';
+      }
+    } catch {
+      status.textContent = 'Error';
+      status.className = 'status-msg error';
+    }
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
+
+  async function duplicateAsset(id: string) {
+    const asset = assets.find(a => a.asset_id === id);
+    if (!asset) return;
+
+    const label = prompt('Label for the copy:', `${asset.label} (copy)`);
+    if (!label) return;
+
+    const res = await fetch('/api/admin/assets', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label,
+        theme_name: asset.theme_name,
+        cv_data: asset.cv_data,
+        is_default: false,
+      }),
+    });
+    if (res.ok) loadAssets();
+  }
+
+  async function setDefault(id: string) {
+    await fetch('/api/admin/assets', {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset_id: id, is_default: true }),
+    });
+    loadAssets();
+  }
+
+  async function deleteAsset(id: string) {
+    const asset = assets.find(a => a.asset_id === id);
+    if (!asset || !confirm(`Delete "${asset.label}"?`)) return;
+
+    await fetch(`/api/admin/assets?id=${id}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    loadAssets();
+  }
+
+  function updatePreview() {
+    const asset = assets.find(a => a.asset_id === editingAssetId);
+    if (!asset) return;
+    (document.getElementById('preview-frame') as HTMLIFrameElement).src =
+      `/admin/preview?theme=${asset.theme_name}&asset_id=${asset.asset_id}&t=${Date.now()}`;
+  }
+
+  // ========== CV Form (reused from cv-editor) ==========
+  function renderForm() {
+    (document.getElementById('cv-name') as HTMLInputElement).value = cvData.header?.name || '';
+    (document.getElementById('cv-title') as HTMLInputElement).value = cvData.header?.title || '';
+    (document.getElementById('cv-summary') as HTMLTextAreaElement).value = cvData.header?.summary || '';
+    (document.getElementById('cv-avatar') as HTMLInputElement).value = cvData.header?.avatar || '';
+    (document.getElementById('cv-links') as HTMLTextAreaElement).value =
+      (cvData.header?.links || []).map((l: any) => `${l.label}|${l.url}`).join('\n');
+    (document.getElementById('cv-meta-title') as HTMLInputElement).value = cvData.meta?.title || 'My CV';
+    (document.getElementById('cv-meta-lang') as HTMLSelectElement).value = cvData.meta?.lang || 'en';
+
+    renderListSection('experience', cvData.experience || [], ['company', 'role', 'location', 'startDate', 'endDate', 'highlights']);
+    renderListSection('education', cvData.education || [], ['institution', 'degree', 'field', 'startDate', 'endDate', 'highlights']);
+    renderSkills(cvData.skills || []);
+    renderProjects(cvData.projects || []);
+    (document.getElementById('cv-json') as HTMLTextAreaElement).value = JSON.stringify(cvData, null, 2);
+  }
+
+  function renderListSection(name: string, items: any[], fields: string[]) {
+    const container = document.getElementById(`${name}-items`)!;
+    container.innerHTML = items.map((item: any, i: number) => `
+      <div class="editor-item" data-index="${i}">
+        <div class="item-header">
+          <strong>#${i + 1}</strong>
+          <button class="btn btn-danger btn-sm" onclick="removeItem('${name}', ${i})">Remove</button>
+        </div>
+        ${fields.map(f => f === 'highlights'
+          ? `<div class="form-group"><label>${f}</label><textarea class="item-field" data-field="${f}" rows="3" placeholder="One per line">${(item[f] || []).join('\n')}</textarea></div>`
+          : `<div class="form-group"><label>${f}</label><input type="text" class="item-field" data-field="${f}" value="${esc(String(item[f] || ''))}" /></div>`
+        ).join('')}
+      </div>
+    `).join('');
+  }
+
+  function renderSkills(skills: any[]) {
+    const container = document.getElementById('skills-items')!;
+    container.innerHTML = skills.map((cat: any, i: number) => `
+      <div class="editor-item" data-index="${i}">
+        <div class="item-header">
+          <strong>#${i + 1}</strong>
+          <button class="btn btn-danger btn-sm" onclick="removeItem('skills', ${i})">Remove</button>
+        </div>
+        <div class="form-group"><label>Category</label><input type="text" class="skill-category" value="${esc(cat.category || '')}" /></div>
+        <div class="form-group"><label>Skills (comma separated)</label><input type="text" class="skill-items" value="${esc((cat.items || []).join(', '))}" /></div>
+      </div>
+    `).join('');
+  }
+
+  function renderProjects(projects: any[]) {
+    const container = document.getElementById('project-items')!;
+    container.innerHTML = projects.map((p: any, i: number) => `
+      <div class="editor-item" data-index="${i}">
+        <div class="item-header">
+          <strong>#${i + 1}</strong>
+          <button class="btn btn-danger btn-sm" onclick="removeItem('projects', ${i})">Remove</button>
+        </div>
+        <div class="form-group"><label>Name</label><input type="text" class="project-name" value="${esc(p.name || '')}" /></div>
+        <div class="form-group"><label>Description</label><textarea class="project-desc" rows="2">${p.description || ''}</textarea></div>
+        <div class="form-group"><label>URL</label><input type="text" class="project-url" value="${esc(p.url || '')}" /></div>
+        <div class="form-group"><label>Highlights (one per line)</label><textarea class="project-highlights" rows="2">${(p.highlights || []).join('\n')}</textarea></div>
+      </div>
+    `).join('');
+  }
+
+  function collectFormData() {
+    cvData.meta = {
+      title: (document.getElementById('cv-meta-title') as HTMLInputElement).value || 'My CV',
+      lang: (document.getElementById('cv-meta-lang') as HTMLSelectElement).value || 'en',
+    };
+    cvData.header = {
+      name: (document.getElementById('cv-name') as HTMLInputElement).value,
+      title: (document.getElementById('cv-title') as HTMLInputElement).value,
+      summary: (document.getElementById('cv-summary') as HTMLTextAreaElement).value,
+      avatar: (document.getElementById('cv-avatar') as HTMLInputElement).value || undefined,
+      links: (document.getElementById('cv-links') as HTMLTextAreaElement).value
+        .split('\n').filter(Boolean).map(line => {
+          const [label, ...rest] = line.split('|');
+          return { label: label.trim(), url: rest.join('|').trim() };
+        }),
+    };
+    cvData.experience = collectListItems('experience', ['company', 'role', 'location', 'startDate', 'endDate', 'highlights']);
+    cvData.education = collectListItems('education', ['institution', 'degree', 'field', 'startDate', 'endDate', 'highlights']);
+
+    const skillItems = document.querySelectorAll('#skills-items .editor-item');
+    cvData.skills = Array.from(skillItems).map(item => ({
+      category: (item.querySelector('.skill-category') as HTMLInputElement).value,
+      items: (item.querySelector('.skill-items') as HTMLInputElement).value.split(',').map((s: string) => s.trim()).filter(Boolean),
+    }));
+
+    const projectItems = document.querySelectorAll('#project-items .editor-item');
+    cvData.projects = Array.from(projectItems).map(item => ({
+      name: (item.querySelector('.project-name') as HTMLInputElement).value,
+      description: (item.querySelector('.project-desc') as HTMLTextAreaElement).value,
+      url: (item.querySelector('.project-url') as HTMLInputElement).value || undefined,
+      highlights: (item.querySelector('.project-highlights') as HTMLTextAreaElement).value.split('\n').filter(Boolean),
+    }));
+  }
+
+  function collectListItems(name: string, fields: string[]) {
+    const items = document.querySelectorAll(`#${name}-items .editor-item`);
+    return Array.from(items).map(item => {
+      const obj: any = {};
+      fields.forEach(f => {
+        const el = item.querySelector(`[data-field="${f}"]`) as HTMLInputElement | HTMLTextAreaElement;
+        if (!el) return;
+        obj[f] = f === 'highlights' ? el.value.split('\n').filter(Boolean) : (el.value || undefined);
+      });
+      return obj;
+    });
+  }
+
+  // ========== Editor event handlers ==========
+  document.getElementById('editor-cancel')?.addEventListener('click', closeEditor);
+  document.getElementById('editor-save')?.addEventListener('click', saveAsset);
+
+  document.getElementById('preview-refresh')?.addEventListener('click', () => {
+    collectFormData();
+    // Save first, then refresh preview
+    saveAsset();
+  });
+
+  // Section tab switching
+  document.getElementById('section-tabs')?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('.tab') as HTMLElement;
+    if (!btn) return;
+    const section = btn.dataset.section!;
+    collectFormData();
+    document.querySelectorAll('#section-tabs .tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.section-panel').forEach(p => p.classList.add('hidden'));
+    document.getElementById(`panel-${section}`)?.classList.remove('hidden');
+    if (section === 'json') {
+      (document.getElementById('cv-json') as HTMLTextAreaElement).value = JSON.stringify(cvData, null, 2);
+    }
+  });
+
+  // Add item buttons
+  document.getElementById('add-experience')?.addEventListener('click', () => {
+    collectFormData();
+    cvData.experience = cvData.experience || [];
+    cvData.experience.push({ company: '', role: '', startDate: '', highlights: [] });
+    renderForm();
+  });
+  document.getElementById('add-education')?.addEventListener('click', () => {
+    collectFormData();
+    cvData.education = cvData.education || [];
+    cvData.education.push({ institution: '', degree: '', startDate: '' });
+    renderForm();
+  });
+  document.getElementById('add-skill-category')?.addEventListener('click', () => {
+    collectFormData();
+    cvData.skills = cvData.skills || [];
+    cvData.skills.push({ category: '', items: [] });
+    renderForm();
+  });
+  document.getElementById('add-project')?.addEventListener('click', () => {
+    collectFormData();
+    cvData.projects = cvData.projects || [];
+    cvData.projects.push({ name: '', description: '' });
+    renderForm();
+  });
+
+  // Apply JSON
+  document.getElementById('apply-json')?.addEventListener('click', () => {
+    try {
+      cvData = JSON.parse((document.getElementById('cv-json') as HTMLTextAreaElement).value);
+      renderForm();
+    } catch { alert('Invalid JSON'); }
+  });
+
+  // ========== RxResume Import ==========
+  document.getElementById('import-rxresume')?.addEventListener('click', () => {
+    (document.getElementById('rxresume-file') as HTMLInputElement).click();
+  });
+
+  document.getElementById('rxresume-file')?.addEventListener('change', async (e) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    input.value = ''; // reset for re-import
+
+    const status = document.getElementById('editor-status')!;
+    status.textContent = 'Importing...';
+    status.className = 'status-msg';
+
+    try {
+      const text = await file.text();
+      const raw = JSON.parse(text);
+
+      const res = await fetch('/api/admin/import-rxresume', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(raw),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        status.textContent = data.error || 'Import failed';
+        status.className = 'status-msg error';
+        return;
+      }
+
+      // Merge imported data (keep meta.lang from current selection)
+      const currentLang = (document.getElementById('cv-meta-lang') as HTMLSelectElement).value;
+      cvData = data.data.cv;
+      cvData.meta = cvData.meta || {};
+      cvData.meta.lang = currentLang || cvData.meta.lang || 'en';
+
+      renderForm();
+      status.textContent = 'Imported! Review and Save.';
+      status.className = 'status-msg success';
+      setTimeout(() => { status.textContent = ''; }, 5000);
+    } catch (err) {
+      status.textContent = 'Invalid JSON file';
+      status.className = 'status-msg error';
+    }
+  });
+
+  // Populate language dropdown from theme's languages config
+  function populateLanguageDropdown(themeName: string, currentLang?: string) {
+    const langSelect = document.getElementById('cv-meta-lang') as HTMLSelectElement;
+    langSelect.innerHTML = '';
+    const config = themeConfigs[themeName];
+    const langs = config?.languages as Record<string, { label: string }> | undefined;
+    if (langs && Object.keys(langs).length > 0) {
+      for (const [code, lang] of Object.entries(langs)) {
+        const opt = document.createElement('option');
+        opt.value = code;
+        opt.textContent = `${lang.label} (${code})`;
+        if (code === currentLang) opt.selected = true;
+        langSelect.appendChild(opt);
+      }
+    } else {
+      const opt = document.createElement('option');
+      opt.value = currentLang || 'en';
+      opt.textContent = currentLang || 'en';
+      langSelect.appendChild(opt);
+    }
+  }
+
+  // Remove item (global)
+  (window as any).removeItem = function(section: string, index: number) {
+    collectFormData();
+    if (Array.isArray(cvData[section])) cvData[section].splice(index, 1);
+    renderForm();
+  };
+
+  // Global handlers for inline onclick
+  (window as any).editAsset = editAsset;
+  (window as any).duplicateAsset = duplicateAsset;
+  (window as any).setDefault = setDefault;
+  (window as any).deleteAsset = deleteAsset;
+
+  // ========== Files Tab ==========
+  async function loadFiles() {
+    const container = document.getElementById('file-list')!;
+    try {
+      const res = await fetch('/api/admin/files', { credentials: 'include' });
+      const data = await res.json();
+      if (data.ok && data.data.files.length > 0) {
+        container.innerHTML = `
+          <table>
+            <thead><tr><th>Name</th><th>Size</th><th>Uploaded</th><th>Action</th></tr></thead>
+            <tbody>
+              ${data.data.files.map((f: any) => `
+                <tr>
+                  <td>${esc(f.key)}</td>
+                  <td>${(f.size / 1024).toFixed(1)} KB</td>
+                  <td>${new Date(f.uploaded).toLocaleString()}</td>
+                  <td><button class="btn btn-danger btn-sm" onclick="deleteFile('${f.key}')">Delete</button></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } else {
+        container.innerHTML = '<p style="color:var(--admin-text-secondary)">No files uploaded yet</p>';
+      }
+    } catch {
+      container.innerHTML = '<p style="color:var(--admin-danger)">Failed to load files</p>';
+    }
+  }
+
+  async function deleteFile(key: string) {
+    if (!confirm(`Delete ${key}?`)) return;
+    await fetch('/api/admin/files', {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    loadFiles();
+  }
+
+  (window as any).deleteFile = deleteFile;
+
+  document.getElementById('upload-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('file-input') as HTMLInputElement;
+    const status = document.getElementById('upload-status')!;
+    const files = input.files;
+    if (!files || files.length === 0) return;
+
+    const total = files.length;
+    let succeeded = 0, failed = 0;
+    status.textContent = `Uploading ${total} file(s)...`;
+    status.className = 'status-msg';
+
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetch('/api/admin/files', { method: 'POST', credentials: 'include', body: formData });
+        if (res.ok) succeeded++; else failed++;
+      } catch { failed++; }
+      status.textContent = `Uploading... ${succeeded + failed}/${total}`;
+    }
+
+    status.textContent = failed === 0 ? `${succeeded} file(s) uploaded!` : `${succeeded} uploaded, ${failed} failed`;
+    status.className = `status-msg ${failed === 0 ? 'success' : 'error'}`;
+    input.value = '';
+    loadFiles();
+  });
+
+  // ========== Init ==========
+  loadAssets();
+</script>
+
+<style>
+  .tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .tab {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--admin-border);
+    border-radius: var(--admin-radius);
+    background: white;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
+
+  .tab.active {
+    background: var(--admin-primary);
+    color: white;
+    border-color: var(--admin-primary);
+  }
+
+  .tab-panel.hidden { display: none; }
+  .hidden { display: none !important; }
+
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .action-cell {
+    display: flex;
+    gap: 0.375rem;
+    flex-wrap: wrap;
+  }
+
+  /* Editor */
+  .editor-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .editor-meta {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.75rem;
+  }
+
+  .form-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0;
+  }
+
+  .form-inline label {
+    margin-bottom: 0;
+    white-space: nowrap;
+  }
+
+  .form-inline input,
+  .form-inline select {
+    width: auto;
+    min-width: 160px;
+  }
+
+  .editor-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .editor-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+  }
+
+  @media (max-width: 1024px) {
+    .editor-layout { grid-template-columns: 1fr; }
+  }
+
+  .preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+
+  .section-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .section-panel.hidden { display: none; }
+
+  .editor-item {
+    border: 1px solid var(--admin-border);
+    border-radius: var(--admin-radius);
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+
+  .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .status-msg {
+    font-size: 0.85rem;
+  }
+
+  .status-msg.success { color: var(--admin-success); }
+  .status-msg.error { color: var(--admin-danger); }
+</style>

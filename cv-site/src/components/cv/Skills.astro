@@ -1,0 +1,28 @@
+---
+interface SkillCategory {
+  category: string;
+  items: string[];
+}
+
+interface Props {
+  items: SkillCategory[];
+}
+
+const { items } = Astro.props;
+---
+
+<section class="cv-section cv-skills">
+  <h2 class="cv-section-title">Skills</h2>
+  <div class="cv-skills-grid">
+    {items.map((cat) => (
+      <div class="cv-skill-category">
+        <h3>{cat.category}</h3>
+        <div class="cv-tags">
+          {cat.items.map((skill) => (
+            <span class="cv-tag">{skill}</span>
+          ))}
+        </div>
+      </div>
+    ))}
+  </div>
+</section>

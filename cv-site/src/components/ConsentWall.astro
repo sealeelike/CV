@@ -1,0 +1,196 @@
+---
+interface Props {
+  turnstileEnabled?: boolean;
+  turnstileSiteKey?: string;
+  magicLinkId?: string;
+}
+
+const { turnstileEnabled = false, turnstileSiteKey = '', magicLinkId = '' } = Astro.props;
+---
+
+<div id="consent-wall" class="consent-wall">
+  <div class="consent-dialog">
+    <h2>Privacy Notice</h2>
+    <p>
+      This CV contains personal information. By continuing, you acknowledge that
+      your visit metadata (IP address, browser fingerprint, access time) will be
+      recorded for security and audit purposes.
+    </p>
+    {turnstileEnabled && turnstileSiteKey && (
+      <div id="consent-turnstile" class="turnstile-container"></div>
+    )}
+    <div class="consent-actions">
+      <button id="consent-decline" class="consent-btn consent-btn-decline">
+        Decline
+      </button>
+      <button id="consent-accept" class="consent-btn consent-btn-accept">
+        I Understand & Agree
+      </button>
+    </div>
+  </div>
+</div>
+
+{turnstileEnabled && turnstileSiteKey && (
+  <script
+    src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+    async
+    defer
+  ></script>
+)}
+
+<script define:vars={{ turnstileEnabled, turnstileSiteKey, magicLinkId }}>
+  function getFingerprintRaw() {
+    return {
+      ua: navigator.userAgent,
+      lang: navigator.language,
+      screen: screen.width + 'x' + screen.height,
+      colorDepth: screen.colorDepth,
+      timezone: new Date().getTimezoneOffset(),
+      cpu: navigator.hardwareConcurrency || 0,
+      platform: navigator.platform || '',
+    };
+  }
+
+  function getFingerprint(raw) {
+    const str = [raw.ua, raw.lang, raw.screen, raw.colorDepth, raw.timezone, raw.cpu, raw.platform].join('|');
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // Check if already consented (session)
+    if (sessionStorage.getItem('cv-consent') === 'true') {
+      document.getElementById('consent-wall')?.remove();
+      return;
+    }
+
+    let turnstileToken = '';
+
+    // Render Turnstile widget if enabled
+    if (turnstileEnabled && turnstileSiteKey && typeof turnstile !== 'undefined') {
+      turnstile.render('#consent-turnstile', {
+        sitekey: turnstileSiteKey,
+        callback: (token) => { turnstileToken = token; },
+      });
+    }
+
+    document.getElementById('consent-decline')?.addEventListener('click', () => {
+      window.location.href = 'about:blank';
+    });
+
+    document.getElementById('consent-accept')?.addEventListener('click', async () => {
+      const btn = document.getElementById('consent-accept');
+      if (btn) btn.textContent = 'Loading...';
+
+      try {
+        const raw = getFingerprintRaw();
+        const body = {
+          fingerprint: getFingerprint(raw),
+          fingerprintRaw: raw,
+          ...(turnstileToken && { turnstileToken }),
+          ...(magicLinkId && { magicLinkId }),
+        };
+
+        const res = await fetch('/api/consent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          sessionStorage.setItem('cv-consent', 'true');
+          if (data.data?.guestId) {
+            sessionStorage.setItem('cv-guest-id', String(data.data.guestId));
+          }
+          document.getElementById('consent-wall')?.remove();
+        } else {
+          alert('Verification failed. Please try again.');
+          if (btn) btn.textContent = 'I Understand & Agree';
+        }
+      } catch {
+        alert('Network error. Please try again.');
+        if (btn) btn.textContent = 'I Understand & Agree';
+      }
+    });
+  });
+</script>
+
+<style>
+  .consent-wall {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .consent-dialog {
+    background: white;
+    border-radius: 12px;
+    padding: 2rem;
+    max-width: 480px;
+    width: 90%;
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+    text-align: center;
+  }
+
+  .consent-dialog h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: #1f2937;
+  }
+
+  .consent-dialog p {
+    font-size: 0.9rem;
+    color: #6b7280;
+    line-height: 1.6;
+    margin-bottom: 1.5rem;
+  }
+
+  .turnstile-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 1rem;
+  }
+
+  .consent-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+  }
+
+  .consent-btn {
+    padding: 0.6rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: opacity 0.15s;
+  }
+
+  .consent-btn:hover {
+    opacity: 0.9;
+  }
+
+  .consent-btn-decline {
+    background: #f3f4f6;
+    color: #6b7280;
+  }
+
+  .consent-btn-accept {
+    background: #2563eb;
+    color: white;
+  }
+</style>

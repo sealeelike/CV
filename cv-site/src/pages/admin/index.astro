@@ -1,0 +1,107 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+import { getGuestCount, getUnreadMessageCount } from '../../lib/db.ts';
+
+const kv = env.KV as KVNamespace;
+const db = env.DB as D1Database;
+
+// Check auth
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) {
+  return Astro.redirect('/admin/login');
+}
+
+const [visitorCount, unreadMessages] = await Promise.all([
+  getGuestCount(db),
+  getUnreadMessageCount(db),
+]);
+---
+
+<AdminLayout title="Dashboard - Admin">
+  <h2 style="margin-bottom: 1.5rem;">Dashboard</h2>
+
+  <div class="stats-grid">
+    <a href="/admin/visitors" class="admin-card stat-card stat-link">
+      <div class="stat-number">{visitorCount}</div>
+      <div class="stat-label">Total Visitors</div>
+    </a>
+    <a href="/admin/messages" class="admin-card stat-card stat-link">
+      <div class="stat-number">{unreadMessages}</div>
+      <div class="stat-label">Unread Messages</div>
+    </a>
+  </div>
+
+  <div class="admin-card">
+    <h2>Quick Links</h2>
+    <ul class="quick-links">
+      <li><a href="/admin/visitors">View visitor log</a></li>
+      <li><a href="/admin/requests">View file requests</a></li>
+      <li><a href="/admin/messages">View messages</a></li>
+      <li><a href="/admin/cv-editor">Edit CV content</a></li>
+      <li><a href="/admin/files">Manage files</a></li>
+      <li><a href="/admin/settings">Configure settings</a></li>
+    </ul>
+  </div>
+</AdminLayout>
+
+<style>
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stat-card {
+    text-align: center;
+  }
+
+  .stat-link {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.15s, box-shadow 0.15s;
+    cursor: pointer;
+  }
+
+  .stat-link:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  .stat-number {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--admin-primary);
+  }
+
+  .stat-label {
+    font-size: 0.875rem;
+    color: var(--admin-text-secondary);
+  }
+
+  .quick-links {
+    list-style: none;
+    padding: 0;
+  }
+
+  .quick-links li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--admin-border);
+  }
+
+  .quick-links li:last-child {
+    border-bottom: none;
+  }
+
+  .quick-links a {
+    color: var(--admin-primary);
+    text-decoration: none;
+  }
+
+  .quick-links a:hover {
+    text-decoration: underline;
+  }
+</style>

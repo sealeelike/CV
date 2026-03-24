@@ -1,0 +1,651 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+
+const kv = env.KV as KVNamespace;
+
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) return Astro.redirect('/admin/login');
+---
+
+<AdminLayout title="Themes - Admin">
+  <!-- List view -->
+  <div id="theme-list-view">
+    <div class="admin-card">
+      <div class="themes-header">
+        <h2>Themes</h2>
+        <button class="btn btn-secondary" id="toggle-upload-btn">Upload Custom Theme</button>
+      </div>
+      <div id="theme-grid" class="theme-grid">Loading...</div>
+    </div>
+
+    <!-- Upload form (hidden by default) -->
+    <div class="admin-card hidden" id="upload-section">
+      <h2>Upload Custom Theme</h2>
+      <p class="hint">A theme = <code>theme.json</code> (config) + <code>style.css</code> (styles).</p>
+      <form id="theme-upload-form">
+        <div class="form-group">
+          <label for="theme-name">Theme Name</label>
+          <input type="text" id="theme-name" placeholder="my-cool-theme" required />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="theme-json-file">theme.json</label>
+            <input type="file" id="theme-json-file" accept=".json" />
+          </div>
+          <div class="form-group">
+            <label for="theme-css-file">style.css</label>
+            <input type="file" id="theme-css-file" accept=".css" />
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Upload</button>
+        <span id="upload-status" class="status-msg"></span>
+      </form>
+    </div>
+  </div>
+
+  <!-- Detail view (hidden by default) -->
+  <div id="theme-detail-view" class="hidden">
+    <div class="detail-top">
+      <button class="btn btn-secondary" id="back-to-list">&larr; Back to Themes</button>
+      <button class="btn btn-primary" id="create-asset-btn">Save as Asset</button>
+    </div>
+
+    <div class="detail-layout">
+      <div class="detail-info">
+        <div class="admin-card">
+          <h2 id="detail-theme-name"></h2>
+          <div class="meta-row">
+            <span class="badge" id="detail-type-badge"></span>
+            <span class="meta-text" id="detail-author"></span>
+            <span class="meta-text" id="detail-version"></span>
+          </div>
+
+          <h3>Supported Sections</h3>
+          <div id="detail-fields" class="field-badges"></div>
+
+          <h3>Layout</h3>
+          <div id="detail-layout-info" class="layout-info"></div>
+
+          <h3>CSS Variables</h3>
+          <div id="detail-variables" class="var-list"></div>
+        </div>
+      </div>
+
+      <div class="detail-preview">
+        <div class="admin-card">
+          <div class="preview-header">
+            <h2>Preview</h2>
+            <button class="btn btn-secondary btn-sm" id="refresh-preview">Refresh</button>
+          </div>
+          <iframe id="detail-preview-frame" style="width:100%;height:700px;border:1px solid var(--admin-border);border-radius:var(--admin-radius);background:white;"></iframe>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Asset Modal -->
+  <div id="asset-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h2>Create Asset from Theme</h2>
+      <p class="hint">This creates a new CV page asset using the selected theme. You can edit the CV data afterwards in the Assets page.</p>
+      <div class="form-group">
+        <label for="asset-label">Asset Label</label>
+        <input type="text" id="asset-label" placeholder='e.g. "Google HR Version"' required />
+      </div>
+      <div class="form-group">
+        <label for="asset-language">Language</label>
+        <select id="asset-language"></select>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="asset-default" /> Set as default
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="modal-create">Create</button>
+      </div>
+      <span id="modal-status" class="status-msg"></span>
+    </div>
+  </div>
+</AdminLayout>
+
+<script>
+  interface ThemeConfig {
+    name: string;
+    author: string;
+    version: string;
+    variables: Record<string, string>;
+    layout: {
+      sections: string[];
+      sidebar: boolean;
+      sidebarSections?: string[];
+      headerStyle: string;
+      fields?: { section: string; required?: boolean }[];
+    };
+    fonts?: string[];
+    languages?: Record<string, { label: string; fonts?: string[]; strings?: Record<string, unknown> }>;
+  }
+
+  let allThemes: { name: string; type: 'builtin' | 'custom'; config: ThemeConfig }[] = [];
+  let selectedThemeName = '';
+
+  async function loadThemes() {
+    const grid = document.getElementById('theme-grid')!;
+    try {
+      const res = await fetch('/api/admin/theme', { credentials: 'include' });
+      const data = await res.json();
+      if (!data.ok) { grid.innerHTML = 'Failed to load'; return; }
+
+      const configs: Record<string, ThemeConfig> = data.data.configs || {};
+
+      allThemes = [
+        ...data.data.builtinThemes.map((n: string) => ({ name: n, type: 'builtin' as const, config: configs[n] })),
+        ...data.data.customThemes.map((n: string) => ({ name: n, type: 'custom' as const, config: configs[n] })),
+      ];
+
+      renderGrid();
+    } catch {
+      grid.innerHTML = 'Error loading themes';
+    }
+  }
+
+  function renderGrid() {
+    const grid = document.getElementById('theme-grid')!;
+    if (allThemes.length === 0) {
+      grid.innerHTML = '<p style="color:var(--admin-text-secondary)">No themes found</p>';
+      return;
+    }
+
+    grid.innerHTML = allThemes.map(t => {
+      const fields = t.config?.layout?.fields || [];
+      const sections = fields.map((f: any) => f.section).join(', ') || t.config?.layout?.sections?.filter((s: string) => s !== 'header').join(', ') || '';
+
+      return `
+        <div class="theme-card" data-theme="${t.name}">
+          <div class="card-preview">
+            <iframe src="/admin/preview?theme=${t.name}&sample=true" loading="lazy" tabindex="-1"></iframe>
+          </div>
+          <div class="card-body">
+            <div class="card-title">${t.config?.name || t.name}</div>
+            <div class="card-meta">
+              <span class="badge badge-${t.type === 'builtin' ? 'info' : 'success'}">${t.type}</span>
+            </div>
+            <div class="card-sections">${sections}</div>
+            <div class="card-actions">
+              <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openDetail('${t.name}')">Details</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Card click = open detail
+    grid.querySelectorAll('.theme-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const name = (card as HTMLElement).dataset.theme!;
+        openDetail(name);
+      });
+    });
+  }
+
+  function openDetail(name: string) {
+    selectedThemeName = name;
+    const t = allThemes.find(x => x.name === name);
+    if (!t) return;
+
+    const config = t.config;
+
+    document.getElementById('detail-theme-name')!.textContent = config?.name || name;
+    const badge = document.getElementById('detail-type-badge')!;
+    badge.textContent = t.type;
+    badge.className = `badge badge-${t.type === 'builtin' ? 'info' : 'success'}`;
+    document.getElementById('detail-author')!.textContent = config?.author ? `by ${config.author}` : '';
+    document.getElementById('detail-version')!.textContent = config?.version ? `v${config.version}` : '';
+
+    // Fields
+    const fieldsEl = document.getElementById('detail-fields')!;
+    const fields = config?.layout?.fields || [];
+    if (fields.length > 0) {
+      fieldsEl.innerHTML = fields.map((f: any) =>
+        `<span class="badge badge-info">${f.section}${f.required ? ' *' : ''}</span>`
+      ).join(' ');
+    } else {
+      const sections = config?.layout?.sections?.filter((s: string) => s !== 'header') || [];
+      fieldsEl.innerHTML = sections.map((s: string) =>
+        `<span class="badge badge-info">${s}</span>`
+      ).join(' ');
+    }
+
+    // Layout info
+    const layoutEl = document.getElementById('detail-layout-info')!;
+    layoutEl.innerHTML = `
+      <div>Header: <strong>${config?.layout?.headerStyle || 'left'}</strong></div>
+      <div>Sidebar: <strong>${config?.layout?.sidebar ? 'Yes' : 'No'}</strong></div>
+      ${config?.layout?.sidebarSections?.length ? `<div>Sidebar sections: <strong>${config.layout.sidebarSections.join(', ')}</strong></div>` : ''}
+      <div>Section order: <strong>${config?.layout?.sections?.join(' → ') || '—'}</strong></div>
+    `;
+
+    // Variables
+    const varsEl = document.getElementById('detail-variables')!;
+    const vars = config?.variables || {};
+    const varEntries = Object.entries(vars);
+    if (varEntries.length > 0) {
+      varsEl.innerHTML = varEntries.map(([k, v]) => {
+        const isColor = v.startsWith('#') || v.startsWith('rgb');
+        return `<div class="var-row">
+          <code>${k}</code>
+          <span>${isColor ? `<span class="color-dot" style="background:${v}"></span>` : ''}${v}</span>
+        </div>`;
+      }).join('');
+    } else {
+      varsEl.innerHTML = '<span style="color:var(--admin-text-secondary)">No custom variables</span>';
+    }
+
+    // Preview (sample=true so real CV data is not exposed in theme browser)
+    (document.getElementById('detail-preview-frame') as HTMLIFrameElement).src =
+      `/admin/preview?theme=${name}&sample=true`;
+
+    // Show detail view
+    document.getElementById('theme-list-view')!.classList.add('hidden');
+    document.getElementById('theme-detail-view')!.classList.remove('hidden');
+  }
+
+  function closeDetail() {
+    document.getElementById('theme-detail-view')!.classList.add('hidden');
+    document.getElementById('theme-list-view')!.classList.remove('hidden');
+  }
+
+  // Back button
+  document.getElementById('back-to-list')?.addEventListener('click', closeDetail);
+
+  // Refresh preview
+  document.getElementById('refresh-preview')?.addEventListener('click', () => {
+    const iframe = document.getElementById('detail-preview-frame') as HTMLIFrameElement;
+    iframe.src = `/admin/preview?theme=${selectedThemeName}&sample=true&t=${Date.now()}`;
+  });
+
+  // Toggle upload
+  document.getElementById('toggle-upload-btn')?.addEventListener('click', () => {
+    document.getElementById('upload-section')!.classList.toggle('hidden');
+  });
+
+  // Upload form
+  document.getElementById('theme-upload-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('upload-status')!;
+    const formData = new FormData();
+
+    const name = (document.getElementById('theme-name') as HTMLInputElement).value;
+    const jsonFile = (document.getElementById('theme-json-file') as HTMLInputElement).files?.[0];
+    const cssFile = (document.getElementById('theme-css-file') as HTMLInputElement).files?.[0];
+
+    if (!name || (!jsonFile && !cssFile)) {
+      status.textContent = 'Name and at least one file required';
+      status.className = 'status-msg error';
+      return;
+    }
+
+    formData.append('name', name);
+    if (jsonFile) formData.append('theme.json', jsonFile);
+    if (cssFile) formData.append('style.css', cssFile);
+
+    status.textContent = 'Uploading...';
+    status.className = 'status-msg';
+    try {
+      const res = await fetch('/api/admin/theme', { method: 'POST', credentials: 'include', body: formData });
+      if (res.ok) {
+        status.textContent = 'Uploaded!';
+        status.className = 'status-msg success';
+        loadThemes();
+      } else {
+        status.textContent = 'Failed';
+        status.className = 'status-msg error';
+      }
+    } catch {
+      status.textContent = 'Error';
+      status.className = 'status-msg error';
+    }
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  });
+
+  // Create Asset
+  document.getElementById('create-asset-btn')?.addEventListener('click', () => {
+    (document.getElementById('asset-label') as HTMLInputElement).value = '';
+    (document.getElementById('asset-default') as HTMLInputElement).checked = false;
+    document.getElementById('modal-status')!.textContent = '';
+
+    // Populate language dropdown from selected theme's languages
+    const langSelect = document.getElementById('asset-language') as HTMLSelectElement;
+    langSelect.innerHTML = '';
+    const theme = allThemes.find(t => t.name === selectedThemeName);
+    const langs = theme?.config.languages;
+    if (langs && Object.keys(langs).length > 0) {
+      for (const [code, lang] of Object.entries(langs)) {
+        const opt = document.createElement('option');
+        opt.value = code;
+        opt.textContent = `${lang.label} (${code})`;
+        langSelect.appendChild(opt);
+      }
+    } else {
+      const opt = document.createElement('option');
+      opt.value = 'en';
+      opt.textContent = 'English (en)';
+      langSelect.appendChild(opt);
+    }
+
+    document.getElementById('asset-modal')!.classList.remove('hidden');
+  });
+
+  document.getElementById('modal-cancel')?.addEventListener('click', () => {
+    document.getElementById('asset-modal')!.classList.add('hidden');
+  });
+
+  document.getElementById('modal-create')?.addEventListener('click', async () => {
+    const label = (document.getElementById('asset-label') as HTMLInputElement).value.trim();
+    const selectedLang = (document.getElementById('asset-language') as HTMLSelectElement).value || 'en';
+    const isDefault = (document.getElementById('asset-default') as HTMLInputElement).checked;
+    const status = document.getElementById('modal-status')!;
+
+    if (!label) {
+      status.textContent = 'Label is required';
+      status.className = 'status-msg error';
+      return;
+    }
+
+    status.textContent = 'Creating...';
+    status.className = 'status-msg';
+
+    try {
+      // Load current CV data to use as initial content
+      const cvRes = await fetch('/api/admin/cv', { credentials: 'include' });
+      const cvJson = await cvRes.json();
+      const cvData = cvJson.ok && cvJson.data?.cv ? cvJson.data.cv : {
+        meta: { title: 'My CV', lang: selectedLang },
+        header: { name: 'Your Name', title: 'Your Title', summary: '', links: [] },
+        experience: [], education: [], skills: [], projects: [],
+      };
+      // Always set the selected language
+      cvData.meta = cvData.meta || {};
+      cvData.meta.lang = selectedLang;
+
+      const res = await fetch('/api/admin/assets', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label,
+          theme_name: selectedThemeName,
+          cv_data: JSON.stringify(cvData),
+          is_default: isDefault,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        status.textContent = 'Created! Redirecting...';
+        status.className = 'status-msg success';
+        setTimeout(() => {
+          window.location.href = '/admin/assets';
+        }, 800);
+      } else {
+        status.textContent = data.error || 'Failed';
+        status.className = 'status-msg error';
+      }
+    } catch {
+      status.textContent = 'Error creating asset';
+      status.className = 'status-msg error';
+    }
+  });
+
+  // Close modal on overlay click
+  document.getElementById('asset-modal')?.addEventListener('click', (e) => {
+    if (e.target === document.getElementById('asset-modal')) {
+      document.getElementById('asset-modal')!.classList.add('hidden');
+    }
+  });
+
+  // Global function for inline handlers
+  (window as any).openDetail = openDetail;
+
+  loadThemes();
+</script>
+
+<style>
+  .themes-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.25rem;
+  }
+
+  .theme-card {
+    border: 2px solid var(--admin-border);
+    border-radius: var(--admin-radius);
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .theme-card:hover {
+    border-color: var(--admin-primary);
+    box-shadow: 0 2px 12px rgba(37, 99, 235, 0.1);
+  }
+
+  .card-preview {
+    height: 180px;
+    overflow: hidden;
+    position: relative;
+    background: #f8fafc;
+    pointer-events: none;
+  }
+
+  .card-preview iframe {
+    width: 200%;
+    height: 200%;
+    transform: scale(0.5);
+    transform-origin: top left;
+    border: none;
+    pointer-events: none;
+  }
+
+  .card-body {
+    padding: 1rem;
+  }
+
+  .card-title {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 0.375rem;
+  }
+
+  .card-meta {
+    display: flex;
+    gap: 0.375rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .card-sections {
+    font-size: 0.8rem;
+    color: var(--admin-text-secondary);
+    margin-bottom: 0.75rem;
+  }
+
+  .card-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  /* Detail view */
+  .detail-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+  }
+
+  .detail-layout {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 1.5rem;
+  }
+
+  @media (max-width: 1024px) {
+    .detail-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .detail-info h3 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin: 1.25rem 0 0.5rem;
+    color: var(--admin-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .meta-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.5rem;
+  }
+
+  .meta-text {
+    font-size: 0.85rem;
+    color: var(--admin-text-secondary);
+  }
+
+  .field-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+
+  .layout-info {
+    font-size: 0.85rem;
+    line-height: 1.8;
+  }
+
+  .var-list {
+    font-size: 0.8rem;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+
+  .var-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--admin-border);
+    gap: 0.5rem;
+  }
+
+  .var-row code {
+    background: var(--admin-bg);
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+
+  .var-row span {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.8rem;
+    text-align: right;
+    word-break: break-all;
+  }
+
+  .color-dot {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid rgba(0,0,0,0.15);
+    flex-shrink: 0;
+  }
+
+  .preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-card {
+    background: white;
+    border-radius: var(--admin-radius);
+    padding: 2rem;
+    width: 420px;
+    max-width: 90vw;
+  }
+
+  .modal-card h2 {
+    margin-bottom: 0.5rem;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: flex-end;
+    margin-top: 1.25rem;
+  }
+
+  /* Shared */
+  .hidden { display: none !important; }
+
+  .hint {
+    font-size: 0.85rem;
+    color: var(--admin-text-secondary);
+    margin-bottom: 1rem;
+  }
+
+  .hint code {
+    background: var(--admin-bg);
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .status-msg {
+    margin-left: 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .status-msg.success { color: var(--admin-success); }
+  .status-msg.error { color: var(--admin-danger); }
+</style>

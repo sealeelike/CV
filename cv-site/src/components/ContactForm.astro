@@ -1,0 +1,194 @@
+---
+interface Props {
+  turnstileEnabled?: boolean;
+  turnstileSiteKey?: string;
+}
+
+const { turnstileEnabled = false, turnstileSiteKey = '' } = Astro.props;
+---
+
+<section class="cv-section contact-form" id="contact">
+  <h2 class="cv-section-title">Contact</h2>
+  <form id="contact-form">
+    <div class="form-row">
+      <div class="form-field">
+        <label for="contact-name">Name (optional)</label>
+        <input type="text" id="contact-name" name="name" placeholder="Your name" />
+      </div>
+      <div class="form-field">
+        <label for="contact-email">Email (optional)</label>
+        <input type="email" id="contact-email" name="email" placeholder="your@email.com" />
+      </div>
+    </div>
+    <div class="form-field">
+      <label for="contact-message">Message <span class="required">*</span></label>
+      <textarea
+        id="contact-message"
+        name="content"
+        rows="4"
+        placeholder="Your message (only the site admin will see this)"
+        required
+      ></textarea>
+    </div>
+    {turnstileEnabled && turnstileSiteKey && (
+      <div id="contact-turnstile" class="turnstile-container"></div>
+    )}
+    <button type="submit" class="submit-btn" id="contact-submit">Send Message</button>
+    <p id="contact-status" class="form-status"></p>
+  </form>
+</section>
+
+{turnstileEnabled && turnstileSiteKey && (
+  <script
+    src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+    async
+    defer
+  ></script>
+)}
+
+<script define:vars={{ turnstileEnabled, turnstileSiteKey }}>
+  document.addEventListener('DOMContentLoaded', () => {
+    let turnstileToken = '';
+
+    if (turnstileEnabled && turnstileSiteKey && typeof turnstile !== 'undefined') {
+      turnstile.render('#contact-turnstile', {
+        sitekey: turnstileSiteKey,
+        callback: (token) => { turnstileToken = token; },
+      });
+    }
+
+    document.getElementById('contact-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('contact-submit');
+      const status = document.getElementById('contact-status');
+      if (btn) btn.textContent = 'Sending...';
+
+      const body = {
+        name: (document.getElementById('contact-name'))?.value || undefined,
+        email: (document.getElementById('contact-email'))?.value || undefined,
+        content: (document.getElementById('contact-message'))?.value,
+        ...(turnstileToken && { turnstileToken }),
+      };
+
+      try {
+        const guestId = sessionStorage.getItem('cv-guest-id');
+        const res = await fetch('/api/contact', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(guestId && { 'X-Guest-Id': guestId }),
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (res.ok) {
+          if (status) {
+            status.textContent = 'Message sent successfully! Only the admin will see it.';
+            status.className = 'form-status success';
+          }
+          document.getElementById('contact-form')?.reset();
+        } else {
+          const err = await res.json();
+          if (status) {
+            status.textContent = err.error || 'Failed to send message.';
+            status.className = 'form-status error';
+          }
+        }
+      } catch {
+        if (status) {
+          status.textContent = 'Network error. Please try again.';
+          status.className = 'form-status error';
+        }
+      }
+
+      if (btn) btn.textContent = 'Send Message';
+    });
+  });
+</script>
+
+<style>
+  .contact-form form {
+    max-width: 600px;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .form-field {
+    margin-bottom: 1rem;
+  }
+
+  .form-field label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    margin-bottom: 0.25rem;
+  }
+
+  .required {
+    color: #ef4444;
+  }
+
+  .form-field input,
+  .form-field textarea {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    font-family: inherit;
+    font-size: 0.9rem;
+    background: var(--color-bg);
+    color: var(--color-text);
+  }
+
+  .form-field input:focus,
+  .form-field textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  }
+
+  .submit-btn {
+    padding: 0.6rem 1.5rem;
+    background: var(--color-primary);
+    color: white;
+    border: none;
+    border-radius: var(--border-radius);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+
+  .submit-btn:hover {
+    opacity: 0.9;
+  }
+
+  .turnstile-container {
+    margin-bottom: 1rem;
+  }
+
+  .form-status {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .form-status.success {
+    color: #22c55e;
+  }
+
+  .form-status.error {
+    color: #ef4444;
+  }
+
+  @media (max-width: 640px) {
+    .form-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

@@ -1,0 +1,375 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import ConsentWall from '../components/ConsentWall.astro';
+import ContactForm from '../components/ContactForm.astro';
+import Header from '../components/cv/Header.astro';
+import Experience from '../components/cv/Experience.astro';
+import Education from '../components/cv/Education.astro';
+import Skills from '../components/cv/Skills.astro';
+import Projects from '../components/cv/Projects.astro';
+import Awards from '../components/cv/Awards.astro';
+import { getCVData, getActiveTheme } from '../lib/kv.ts';
+import { getTurnstileConfig } from '../lib/turnstile.ts';
+import { loadTheme } from '../lib/theme.ts';
+import { requireAdmin } from '../lib/auth.ts';
+import { getAssetForRequest, migrateKVToAsset, getVariantAsset, getVariantsForMagicLink } from '../lib/assets.ts';
+import type { CVData, TurnstileConfig, VariantAsset } from '../types/index.ts';
+
+const kv = env.KV as KVNamespace;
+const db = env.DB as D1Database;
+const r2 = env.R2 as R2Bucket;
+
+// Parse magic_link cookie — used for asset routing & access control
+const cookieHeader = Astro.request.headers.get('Cookie') ?? '';
+const magicMatch = cookieHeader.match(/(?:^|;\s*)magic_link=([^;]+)/);
+const magicLinkId: string | null = magicMatch ? magicMatch[1] : null;
+
+// Check if viewer is admin (bypass access control)
+const isAdmin = await requireAdmin(Astro.request, kv);
+
+// Access control: require magic link or admin session
+const hasAccess = !!magicLinkId || isAdmin;
+
+// Only load CV data if access is granted
+let cvData: CVData | null = null;
+let themeName = 'default';
+let asset: import('../types/index.ts').Asset | null = null;
+let variants: VariantAsset[] = [];
+let currentVariantId: string | null = null;
+let theme: Awaited<ReturnType<typeof loadTheme>> | null = null;
+let turnstileConfig: TurnstileConfig | null = null;
+
+// Default nav/footer strings (English); zh theme overrides via theme.config.strings
+const DEFAULT_NAV_LINKS = [
+  { label: 'Portfolio', href: '#', active: true },
+  { label: 'Contact', href: '#contact' },
+];
+const DEFAULT_NAV_DOWNLOAD = 'Download CV';
+const DEFAULT_FOOTER_BRAND = 'THE CURATED MANUSCRIPT';
+
+if (hasAccess) {
+  // Try auto-migration from KV → assets table (one-time, no-op if assets exist)
+  await migrateKVToAsset(db, kv);
+
+  // Read ?v= variant param
+  const _url = new URL(Astro.request.url);
+  const variantParam = _url.searchParams.get('v');
+
+  // Load CV data + theme: variant → normal → KV fallback
+  if (magicLinkId && variantParam) {
+    asset = await getVariantAsset(db, magicLinkId, variantParam);
+  }
+  if (!asset) {
+    asset = await getAssetForRequest(db, magicLinkId);
+  }
+
+  if (asset) {
+    cvData = JSON.parse(asset.cv_data) as CVData;
+    themeName = asset.theme_name;
+  } else {
+    // Fallback to KV (pre-migration or empty state)
+    cvData = await getCVData(kv);
+    themeName = await getActiveTheme(kv);
+  }
+
+  // Load variant list for language switcher
+  if (magicLinkId) {
+    variants = await getVariantsForMagicLink(db, magicLinkId);
+    currentVariantId = asset?.asset_id ?? null;
+  }
+
+  theme = await loadTheme(themeName, r2);
+
+  // Load turnstile config
+  turnstileConfig = await getTurnstileConfig(kv);
+}
+
+// Sample CV data for first-time setup
+const sampleCV: CVData = {
+  meta: { title: 'My CV', lang: 'en' },
+  header: {
+    name: 'Your Name',
+    title: 'Your Title',
+    summary: 'Welcome to your CV site. Go to /admin to set up your CV content.',
+    links: [{ label: 'Setup', url: '/admin' }],
+  },
+  experience: [],
+  education: [],
+  skills: [],
+  projects: [],
+};
+
+const cv = cvData ?? sampleCV;
+
+// Pre-process sections for optional sidebar layout (only if access granted)
+type SectionGroup =
+  | { type: 'section'; name: string }
+  | { type: 'sidebar'; sections: string[] };
+
+let sectionGroups: SectionGroup[] = [];
+if (hasAccess && theme) {
+  const sidebarEnabled = theme.config.layout.sidebar ?? false;
+  const sidebarSecs: string[] = theme.config.layout.sidebarSections ?? [];
+
+  if (sidebarEnabled && sidebarSecs.length > 0) {
+    const allSections = theme.config.layout.sections.filter((s) => s !== 'header');
+    let buffer: string[] = [];
+    for (const section of allSections) {
+      if (sidebarSecs.includes(section)) {
+        buffer.push(section);
+      } else {
+        if (buffer.length > 0) {
+          sectionGroups.push({ type: 'sidebar', sections: buffer });
+          buffer = [];
+        }
+        sectionGroups.push({ type: 'section', name: section });
+      }
+    }
+    if (buffer.length > 0) sectionGroups.push({ type: 'sidebar', sections: buffer });
+  } else {
+    sectionGroups = theme.config.layout.sections
+      .filter((s) => s !== 'header')
+      .map((s) => ({ type: 'section' as const, name: s }));
+  }
+}
+
+// Resolve language variant: languages[lang] > top-level > English defaults
+const lang = cv.meta.lang || 'en';
+const langConfig = theme?.config.languages?.[lang];
+const resolvedFonts = langConfig?.fonts ?? theme?.config.fonts;
+const navLinks = langConfig?.strings?.navLinks ?? theme?.config.strings?.navLinks ?? DEFAULT_NAV_LINKS;
+const navDownload = langConfig?.strings?.navDownload ?? theme?.config.strings?.navDownload ?? DEFAULT_NAV_DOWNLOAD;
+const footerBrand = langConfig?.strings?.footerBrand ?? theme?.config.strings?.footerBrand ?? DEFAULT_FOOTER_BRAND;
+const footerCopy = langConfig?.strings?.footerCopy ?? theme?.config.strings?.footerCopy ?? 'ALL RIGHTS RESERVED.';
+const activeVariant = variants.find(v => v.asset_id === currentVariantId) ?? variants[0];
+---
+
+{hasAccess && theme ? (
+<BaseLayout
+  title={cv.meta.title}
+  lang={cv.meta.lang}
+  themeCSS={theme.css}
+  themeVars={theme.config.variables}
+  fonts={resolvedFonts}
+>
+  {!isAdmin && (
+    <ConsentWall
+      turnstileEnabled={turnstileConfig?.enabled ?? false}
+      turnstileSiteKey={turnstileConfig?.siteKey ?? ''}
+      magicLinkId={magicLinkId ?? undefined}
+    />
+  )}
+
+  <header class="top-app-bar">
+    <div class="top-app-bar-inner">
+      <div class="top-bar-left">
+        <div class="top-app-bar-brand">{cv.header.name}</div>
+        {variants.length >= 2 && (
+          <div class="variant-switcher">
+            <button class="variant-btn-active">
+              <span>{activeVariant?.label}</span>
+              <span class="variant-expand">▾</span>
+            </button>
+            <div class="variant-dropdown">
+              {variants.map(v => (
+                <a
+                  href={`/?v=${v.asset_id}`}
+                  class:list={[{ active: v.asset_id === currentVariantId }]}
+                >
+                  {v.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      <nav class="top-app-bar-nav">
+        {navLinks.map(link => (
+          <a href={link.href} class:list={['top-app-bar-link', { active: link.active }]}>{link.label}</a>
+        ))}
+        <a href="/request" class="top-app-bar-btn">{navDownload}</a>
+      </nav>
+      <button class="top-app-bar-menu" aria-label="Menu">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="cv-page">
+    <Header
+      name={cv.header.name}
+      title={cv.header.title}
+      summary={cv.header.summary}
+      avatar={cv.header.avatar}
+      links={cv.header.links}
+      headerStyle={theme.config.layout.headerStyle}
+    />
+
+    {sectionGroups.map((group) => {
+      if (group.type === 'sidebar') {
+        return (
+          <div class="cv-sidebar">
+            {group.sections.map((section) => {
+              if (section === 'education' && cv.education.length > 0) return <Education items={cv.education} />;
+              if (section === 'skills' && cv.skills.length > 0) return <Skills items={cv.skills} />;
+              return null;
+            })}
+          </div>
+        );
+      }
+      const section = group.name;
+      if (section === 'experience' && cv.experience.length > 0) return <Experience items={cv.experience} />;
+      if (section === 'education' && cv.education.length > 0) return <Education items={cv.education} />;
+      if (section === 'skills' && cv.skills.length > 0) return <Skills items={cv.skills} />;
+      if (section === 'projects' && cv.projects && cv.projects.length > 0) return <Projects items={cv.projects} />;
+      if (section === 'awards' && cv.awards && cv.awards.length > 0) return <Awards items={cv.awards} />;
+      return null;
+    })}
+
+    <ContactForm
+      turnstileEnabled={turnstileConfig?.enabled ?? false}
+      turnstileSiteKey={turnstileConfig?.siteKey ?? ''}
+    />
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div class="site-footer-brand">{footerBrand}</div>
+      <div class="site-footer-copy">&copy; {new Date().getFullYear()} {footerBrand}. {footerCopy}</div>
+      <div class="site-footer-links">
+        {cv.header.links.filter(l => l.url.startsWith('http')).slice(0, 3).map(link => (
+          <a href={link.url} target="_blank" rel="noopener noreferrer">{link.label}</a>
+        ))}
+      </div>
+    </div>
+  </footer>
+</BaseLayout>
+) : (
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Access Required</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #fdfcfb;
+      color: #1f2937;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .gate {
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+    }
+    .gate-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 1.5rem;
+      color: #6366f1;
+    }
+    .gate h1 {
+      font-family: 'Noto Serif', serif;
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin-bottom: 0.75rem;
+    }
+    .gate p {
+      color: #6b7280;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      margin-bottom: 2rem;
+    }
+    .gate-form {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .gate-form input {
+      flex: 1;
+      padding: 0.6rem 0.85rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .gate-form input:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
+    }
+    .gate-form button {
+      padding: 0.6rem 1.25rem;
+      background: #1f2937;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: inherit;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .gate-form button:hover { opacity: 0.85; }
+    .gate-hint {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+    .gate-error {
+      color: #dc2626;
+      font-size: 0.8rem;
+      margin-top: 0.5rem;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="gate">
+    <svg class="gate-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      <circle cx="12" cy="16" r="1" />
+    </svg>
+    <h1>Access Required</h1>
+    <p>This portfolio is shared via private links. If you received an access link, please use it directly. You can also enter your access code below.</p>
+    <form class="gate-form" id="gate-form">
+      <input type="text" id="gate-token" placeholder="Enter access code" autocomplete="off" />
+      <button type="submit">Verify</button>
+    </form>
+    <div class="gate-error" id="gate-error"></div>
+    <p class="gate-hint">The access code is the token from your invitation link.</p>
+  </div>
+  <script>
+    document.getElementById('gate-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = document.getElementById('gate-token') as HTMLInputElement;
+      const errEl = document.getElementById('gate-error') as HTMLElement;
+      const token = input.value.trim();
+      if (!token) { input.focus(); return; }
+      // Extract token from full URL if pasted
+      let code = token;
+      try {
+        const url = new URL(token);
+        const t = url.searchParams.get('token');
+        if (t) code = t;
+      } catch { /* not a URL, use as-is */ }
+      // Navigate to verify endpoint
+      window.location.href = `/api/verify-magic?token=${encodeURIComponent(code)}`;
+    });
+  </script>
+</body>
+</html>
+)}

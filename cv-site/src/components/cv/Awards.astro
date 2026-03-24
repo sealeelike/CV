@@ -1,0 +1,33 @@
+---
+interface AwardItem {
+  title: string;
+  awarder: string;
+  date?: string;
+  description?: string;
+}
+
+interface Props {
+  items: AwardItem[];
+}
+
+const { items } = Astro.props;
+---
+
+<section class="cv-section cv-awards">
+  <h2 class="cv-section-title">Honors & Awards</h2>
+  {items.map((item) => (
+    <div class="cv-item">
+      <div class="cv-item-header">
+        <div>
+          <span class="cv-item-title">{item.title}</span>
+          <span class="cv-item-subtitle"> — {item.awarder}</span>
+        </div>
+        {item.date && <span class="cv-item-date">{item.date}</span>}
+      </div>
+      {item.description && <p class="cv-item-description">{item.description}</p>}
+      <div class="cv-item-actions">
+        <a href="/request">Request Document <span class="arrow">&nearr;</span></a>
+      </div>
+    </div>
+  ))}
+</section>

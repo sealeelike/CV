@@ -1,0 +1,229 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+import { getGuests, getGuestCount, getGuestsByFingerprint, getGuestCountByFingerprint } from '../../lib/db.ts';
+
+const kv = env.KV as KVNamespace;
+const db = env.DB as D1Database;
+
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) return Astro.redirect('/admin/login');
+
+const url = new URL(Astro.request.url);
+const page = parseInt(url.searchParams.get('page') ?? '1', 10);
+const fpFilter = url.searchParams.get('fp') ?? '';
+const highlightId = url.searchParams.get('highlight') ?? '';
+const limit = 20;
+const offset = (page - 1) * limit;
+
+const [guests, total] = await Promise.all([
+  fpFilter ? getGuestsByFingerprint(db, fpFilter, limit, offset) : getGuests(db, limit, offset),
+  fpFilter ? getGuestCountByFingerprint(db, fpFilter) : getGuestCount(db),
+]);
+
+const totalPages = Math.ceil(total / limit);
+
+// When filtering by fingerprint, gather summary info
+const fpFirstSeen = fpFilter && guests.length > 0 ? guests[guests.length - 1].consent_time : null;
+const fpLastSeen = fpFilter && guests.length > 0 ? guests[0].consent_time : null;
+const fpIPs = fpFilter ? [...new Set(guests.map(g => g.ip).filter(Boolean))] : [];
+const fpCountries = fpFilter ? [...new Set(guests.map(g => g.geo_country).filter(Boolean))] : [];
+// Parse raw fingerprint from most recent record
+const fpRaw = fpFilter && guests.length > 0 && guests[0].fingerprint_raw
+  ? (() => { try { return JSON.parse(guests[0].fingerprint_raw!); } catch { return null; } })()
+  : null;
+---
+
+<AdminLayout title="Visitors - Admin">
+  <div class="admin-card">
+    <h2>Visitor Log ({total} total)</h2>
+    {fpFilter && (
+      <div class="fp-detail">
+        <div class="fp-detail-header">
+          <strong>Fingerprint Detail</strong>
+          <a href="/admin/visitors">Clear filter</a>
+        </div>
+        <div class="fp-detail-body">
+          <div class="fp-field">
+            <span class="fp-label">Full Fingerprint</span>
+            <code class="fp-value">{fpFilter}</code>
+          </div>
+          <div class="fp-field">
+            <span class="fp-label">Total Visits</span>
+            <span>{total}</span>
+          </div>
+          <div class="fp-field">
+            <span class="fp-label">First Seen</span>
+            <span>{fpFirstSeen ? new Date(fpFirstSeen).toLocaleString() : '-'}</span>
+          </div>
+          <div class="fp-field">
+            <span class="fp-label">Last Seen</span>
+            <span>{fpLastSeen ? new Date(fpLastSeen).toLocaleString() : '-'}</span>
+          </div>
+          <div class="fp-field">
+            <span class="fp-label">Known IPs</span>
+            <span>{fpIPs.length > 0 ? fpIPs.join(', ') : '-'}</span>
+          </div>
+          <div class="fp-field">
+            <span class="fp-label">Countries</span>
+            <span>{fpCountries.length > 0 ? fpCountries.join(', ') : '-'}</span>
+          </div>
+          {fpRaw && <>
+            <div class="fp-field">
+              <span class="fp-label">Screen</span>
+              <span>{fpRaw.screen}</span>
+            </div>
+            <div class="fp-field">
+              <span class="fp-label">Color Depth</span>
+              <span>{fpRaw.colorDepth}-bit</span>
+            </div>
+            <div class="fp-field">
+              <span class="fp-label">Language</span>
+              <span>{fpRaw.lang}</span>
+            </div>
+            <div class="fp-field">
+              <span class="fp-label">Timezone Offset</span>
+              <span>UTC{fpRaw.timezone <= 0 ? '+' : ''}{-fpRaw.timezone / 60}h</span>
+            </div>
+            <div class="fp-field">
+              <span class="fp-label">CPU Cores</span>
+              <span>{fpRaw.cpu || '-'}</span>
+            </div>
+            <div class="fp-field">
+              <span class="fp-label">Platform</span>
+              <span>{fpRaw.platform || '-'}</span>
+            </div>
+            <div class="fp-field" style="grid-column:1/-1">
+              <span class="fp-label">User Agent</span>
+              <span style="word-break:break-all;font-size:0.78rem">{fpRaw.ua}</span>
+            </div>
+          </>}
+        </div>
+      </div>
+    )}
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>IP</th>
+          <th>Country</th>
+          <th>City</th>
+          <th>Fingerprint</th>
+          <th>Magic Link</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        {guests.map((g) => (
+          <tr class={highlightId && String(g.guest_id) === highlightId ? 'highlight-row' : ''} id={highlightId && String(g.guest_id) === highlightId ? `guest-${g.guest_id}` : undefined}>
+            <td>{g.guest_id}</td>
+            <td><code>{g.ip ?? '-'}</code></td>
+            <td>{g.geo_country ?? '-'}</td>
+            <td>{g.geo_city ?? '-'}</td>
+            <td>
+              {g.fingerprint ? (
+                <a href={`/admin/visitors?fp=${g.fingerprint}`} title={g.fingerprint}>
+                  <code>{g.fingerprint.slice(0, 8)}...</code>
+                </a>
+              ) : '-'}
+            </td>
+            <td>
+              {g.magic_link_token ? (
+                <a href="/admin/access" title={g.magic_link_label || g.magic_link_token}>
+                  <code>{g.magic_link_token.length > 16 ? g.magic_link_token.slice(0, 14) + '...' : g.magic_link_token}</code>
+                </a>
+              ) : '-'}
+            </td>
+            <td>{new Date(g.consent_time).toLocaleString()}</td>
+          </tr>
+        ))}
+        {guests.length === 0 && (
+          <tr><td colspan="7" style="text-align:center;color:var(--admin-text-secondary)">No visitors yet</td></tr>
+        )}
+      </tbody>
+    </table>
+
+    {totalPages > 1 && (
+      <div class="pagination">
+        {page > 1 && <a href={`/admin/visitors?page=${page - 1}${fpFilter ? `&fp=${fpFilter}` : ''}`}>Previous</a>}
+        <span>Page {page} of {totalPages}</span>
+        {page < totalPages && <a href={`/admin/visitors?page=${page + 1}${fpFilter ? `&fp=${fpFilter}` : ''}`}>Next</a>}
+      </div>
+    )}
+  </div>
+</AdminLayout>
+
+<style>
+  .fp-detail {
+    margin-bottom: 1rem;
+    border: 1px solid var(--admin-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .fp-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    background: var(--admin-bg);
+    border-bottom: 1px solid var(--admin-border);
+    font-size: 0.85rem;
+  }
+  .fp-detail-header a {
+    color: var(--admin-primary);
+    text-decoration: none;
+  }
+  .fp-detail-body {
+    padding: 0.75rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem 1.5rem;
+    font-size: 0.85rem;
+  }
+  .fp-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+  .fp-field:first-child {
+    grid-column: 1 / -1;
+  }
+  .fp-label {
+    font-size: 0.75rem;
+    color: var(--admin-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .fp-value {
+    word-break: break-all;
+  }
+  .pagination {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 1rem;
+    font-size: 0.875rem;
+  }
+  .pagination a {
+    color: var(--admin-primary);
+    text-decoration: none;
+  }
+  code {
+    font-size: 0.8rem;
+    background: var(--admin-bg);
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+  }
+
+  .highlight-row {
+    background: color-mix(in srgb, var(--admin-primary, #2563eb) 12%, transparent);
+    animation: highlight-fade 3s ease-out forwards;
+  }
+
+  @keyframes highlight-fade {
+    0% { background: color-mix(in srgb, var(--admin-primary, #2563eb) 20%, transparent); }
+    100% { background: transparent; }
+  }
+</style>

@@ -1,0 +1,234 @@
+---
+interface Props {
+  title?: string;
+}
+
+const { title = 'Admin - CV Site' } = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <style is:global>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --admin-primary: #2563eb;
+        --admin-bg: #f1f5f9;
+        --admin-card: #ffffff;
+        --admin-text: #1e293b;
+        --admin-text-secondary: #64748b;
+        --admin-border: #e2e8f0;
+        --admin-danger: #ef4444;
+        --admin-success: #22c55e;
+        --admin-warning: #f59e0b;
+        --admin-radius: 8px;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: var(--admin-bg);
+        color: var(--admin-text);
+        line-height: 1.5;
+      }
+
+      .admin-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+
+      .admin-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 2rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--admin-border);
+      }
+
+      .admin-header h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+      }
+
+      .admin-nav {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+      }
+
+      .admin-nav a {
+        padding: 0.5rem 1rem;
+        border-radius: var(--admin-radius);
+        background: var(--admin-card);
+        color: var(--admin-text);
+        text-decoration: none;
+        font-size: 0.875rem;
+        border: 1px solid var(--admin-border);
+        transition: background 0.15s;
+      }
+
+      .admin-nav a:hover,
+      .admin-nav a.active {
+        background: var(--admin-primary);
+        color: white;
+        border-color: var(--admin-primary);
+      }
+
+      .admin-card {
+        background: var(--admin-card);
+        border-radius: var(--admin-radius);
+        border: 1px solid var(--admin-border);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .admin-card h2 {
+        font-size: 1.125rem;
+        margin-bottom: 1rem;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.5rem 1rem;
+        border-radius: var(--admin-radius);
+        font-size: 0.875rem;
+        font-weight: 500;
+        border: none;
+        cursor: pointer;
+        transition: opacity 0.15s;
+      }
+
+      .btn:hover {
+        opacity: 0.9;
+      }
+
+      .btn-primary {
+        background: var(--admin-primary);
+        color: white;
+      }
+
+      .btn-danger {
+        background: var(--admin-danger);
+        color: white;
+      }
+
+      .btn-secondary {
+        background: var(--admin-border);
+        color: var(--admin-text);
+      }
+
+      input[type="text"],
+      input[type="email"],
+      input[type="password"],
+      input[type="url"],
+      textarea,
+      select {
+        width: 100%;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--admin-border);
+        border-radius: var(--admin-radius);
+        font-size: 0.875rem;
+        font-family: inherit;
+        background: white;
+      }
+
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        border-color: var(--admin-primary);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+      }
+
+      label {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 500;
+        margin-bottom: 0.25rem;
+      }
+
+      .form-group {
+        margin-bottom: 1rem;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.125rem 0.5rem;
+        border-radius: 9999px;
+        font-size: 0.75rem;
+        font-weight: 500;
+      }
+
+      .badge-success {
+        background: #dcfce7;
+        color: #166534;
+      }
+
+      .badge-warning {
+        background: #fef3c7;
+        color: #92400e;
+      }
+
+      .badge-danger {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
+      .badge-info {
+        background: #dbeafe;
+        color: #1e40af;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 0.75rem;
+        border-bottom: 1px solid var(--admin-border);
+        font-size: 0.875rem;
+      }
+
+      th {
+        font-weight: 600;
+        color: var(--admin-text-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-container">
+      <div class="admin-header">
+        <h1>CV Site Admin</h1>
+        <a href="/" style="font-size: 0.875rem;">View Site</a>
+      </div>
+      <nav class="admin-nav">
+        <a href="/admin">Dashboard</a>
+        <a href="/admin/visitors">Visitors</a>
+        <a href="/admin/requests">File Requests</a>
+        <a href="/admin/access">Access Control</a>
+        <a href="/admin/messages">Messages</a>
+        <a href="/admin/assets">Assets</a>
+        <a href="/admin/themes">Theme Store</a>
+        <a href="/admin/settings">Settings</a>
+      </nav>
+      <slot />
+    </div>
+  </body>
+</html>

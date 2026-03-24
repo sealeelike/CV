@@ -1,0 +1,93 @@
+---
+interface Props {
+  name: string;
+  title: string;
+  summary: string;
+  avatar?: string;
+  links: { label: string; url: string; icon?: string }[];
+  headerStyle?: 'centered' | 'left' | 'split';
+}
+
+const { name, title, summary, avatar, links, headerStyle = 'split' } = Astro.props;
+
+// Classify links
+function classifyLink(url: string) {
+  if (!url) return 'text';
+  if (url.startsWith('http://') || url.startsWith('https://')) return 'external';
+  if (url.startsWith('mailto:')) return 'copy';
+  if (url.startsWith('tel:')) return 'copy';
+  return 'external'; // default: treat as navigable
+}
+
+function extractCopyValue(url: string) {
+  if (url.startsWith('mailto:')) return url.replace('mailto:', '');
+  if (url.startsWith('tel:')) return url.replace('tel:', '');
+  return url;
+}
+---
+
+<section class="cv-header" data-style={headerStyle}>
+  {avatar && <img src={avatar} alt={name} class="avatar" />}
+  <div class="header-info">
+    <h1>{name}</h1>
+    <p class="title">{title}</p>
+    {summary && <p class="summary">{summary}</p>}
+    {links.length > 0 && (
+      <div class="links">
+        {links.map((link, i) => (
+          <>
+            {i > 0 && <span class="link-sep" aria-hidden="true">·</span>}
+            {classifyLink(link.url) === 'external' ? (
+              <a href={link.url} target="_blank" rel="noopener noreferrer">
+                {link.label}
+              </a>
+            ) : classifyLink(link.url) === 'copy' ? (
+              <button
+                class="copy-link"
+                type="button"
+                data-copy={extractCopyValue(link.url)}
+                title={`Copy ${extractCopyValue(link.url)}`}
+              >
+                {link.label}
+              </button>
+            ) : (
+              <span class="link-text">{link.label}</span>
+            )}
+          </>
+        ))}
+      </div>
+    )}
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('.copy-link').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const value = btn.dataset.copy;
+      if (!value) return;
+
+      try {
+        await navigator.clipboard.writeText(value);
+      } catch {
+        // Fallback for older browsers
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+
+      // Show feedback
+      const original = btn.textContent;
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove('copied');
+      }, 1500);
+    });
+  });
+</script>

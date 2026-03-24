@@ -1,0 +1,151 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Header from '../../components/cv/Header.astro';
+import Experience from '../../components/cv/Experience.astro';
+import Education from '../../components/cv/Education.astro';
+import Skills from '../../components/cv/Skills.astro';
+import Projects from '../../components/cv/Projects.astro';
+import Awards from '../../components/cv/Awards.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+import { getCVData, getActiveTheme } from '../../lib/kv.ts';
+import { getDefaultAsset } from '../../lib/assets.ts';
+import { loadTheme } from '../../lib/theme.ts';
+import type { CVData, ThemeConfig } from '../../types/index.ts';
+
+const kv = env.KV as KVNamespace;
+const db = env.DB as D1Database;
+const r2 = env.R2 as R2Bucket;
+
+// Admin only
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) return new Response('Unauthorized', { status: 401 });
+
+// Read params
+const url = new URL(Astro.request.url);
+const themeParam = url.searchParams.get('theme');
+const useSample = url.searchParams.get('sample') === 'true';
+const assetIdParam = url.searchParams.get('asset_id');
+
+const sampleCV: CVData = {
+  meta: { title: 'Theme Preview', lang: 'en' },
+  header: {
+    name: 'Alex Rivera',
+    title: 'Senior Software Engineer',
+    summary: 'Full-stack engineer with 8 years of experience building scalable web applications. Passionate about clean architecture and developer experience.',
+    links: [{ label: 'GitHub', url: 'https://github.com' }, { label: 'LinkedIn', url: 'https://linkedin.com' }],
+  },
+  experience: [
+    { company: 'Acme Corp', role: 'Senior Engineer', period: '2021 – Present', description: 'Led migration of monolithic system to microservices. Reduced deployment time by 60%.' },
+    { company: 'Startup Inc', role: 'Full-Stack Developer', period: '2018 – 2021', description: 'Built core product features from scratch using React and Node.js.' },
+  ],
+  education: [
+    { school: 'State University', degree: 'B.S. Computer Science', period: '2014 – 2018' },
+  ],
+  skills: [
+    { category: 'Languages', items: ['TypeScript', 'Python', 'Go', 'SQL'] },
+    { category: 'Frameworks', items: ['React', 'Node.js', 'Astro', 'FastAPI'] },
+  ],
+  projects: [
+    { name: 'Open Source CLI Tool', description: 'A developer productivity tool with 2k+ GitHub stars.', url: 'https://github.com' },
+  ],
+};
+
+// Load CV data: use sample when browsing themes, otherwise load real asset
+let cvData: CVData | null = null;
+let defaultThemeName: string = 'default';
+
+if (!useSample) {
+  // If a specific asset_id is provided, load that asset; otherwise fall back to default
+  let asset: import('../../types/index.ts').Asset | null = null;
+  if (assetIdParam) {
+    asset = await db.prepare('SELECT * FROM assets WHERE asset_id = ?').bind(assetIdParam).first();
+  }
+  if (!asset) {
+    asset = await getDefaultAsset(db);
+  }
+  if (asset) {
+    cvData = JSON.parse(asset.cv_data) as CVData;
+    defaultThemeName = asset.theme_name;
+  } else {
+    cvData = await getCVData(kv);
+    defaultThemeName = await getActiveTheme(kv);
+  }
+}
+
+const themeName = themeParam ?? defaultThemeName;
+const theme = await loadTheme(themeName, r2);
+
+const cv = cvData ?? sampleCV;
+
+// Sidebar layout logic (same as index.astro)
+type SectionGroup =
+  | { type: 'section'; name: string }
+  | { type: 'sidebar'; sections: string[] };
+
+const sidebarEnabled = theme.config.layout.sidebar ?? false;
+const sidebarSecs: string[] = theme.config.layout.sidebarSections ?? [];
+
+let sectionGroups: SectionGroup[];
+if (sidebarEnabled && sidebarSecs.length > 0) {
+  const allSections = theme.config.layout.sections.filter((s) => s !== 'header');
+  sectionGroups = [];
+  let buffer: string[] = [];
+  for (const section of allSections) {
+    if (sidebarSecs.includes(section)) {
+      buffer.push(section);
+    } else {
+      if (buffer.length > 0) {
+        sectionGroups.push({ type: 'sidebar', sections: buffer });
+        buffer = [];
+      }
+      sectionGroups.push({ type: 'section', name: section });
+    }
+  }
+  if (buffer.length > 0) sectionGroups.push({ type: 'sidebar', sections: buffer });
+} else {
+  sectionGroups = theme.config.layout.sections
+    .filter((s) => s !== 'header')
+    .map((s) => ({ type: 'section' as const, name: s }));
+}
+---
+
+<BaseLayout
+  title={cv.meta.title}
+  lang={cv.meta.lang}
+  themeCSS={theme.css}
+  themeVars={theme.config.variables}
+  fonts={theme.config.fonts}
+>
+  <main class="cv-page">
+    <Header
+      name={cv.header.name}
+      title={cv.header.title}
+      summary={cv.header.summary}
+      avatar={cv.header.avatar}
+      links={cv.header.links}
+      headerStyle={theme.config.layout.headerStyle}
+    />
+
+    {sectionGroups.map((group) => {
+      if (group.type === 'sidebar') {
+        return (
+          <div class="cv-sidebar">
+            {group.sections.map((section) => {
+              if (section === 'education' && cv.education.length > 0) return <Education items={cv.education} />;
+              if (section === 'skills' && cv.skills.length > 0) return <Skills items={cv.skills} />;
+              return null;
+            })}
+          </div>
+        );
+      }
+      const section = group.name;
+      if (section === 'experience' && cv.experience.length > 0) return <Experience items={cv.experience} />;
+      if (section === 'education' && cv.education.length > 0) return <Education items={cv.education} />;
+      if (section === 'skills' && cv.skills.length > 0) return <Skills items={cv.skills} />;
+      if (section === 'projects' && cv.projects && cv.projects.length > 0) return <Projects items={cv.projects} />;
+      if (section === 'awards' && cv.awards && cv.awards.length > 0) return <Awards items={cv.awards} />;
+      return null;
+    })}
+  </main>
+</BaseLayout>

@@ -1,0 +1,74 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+import { getFileRequests } from '../../lib/db.ts';
+
+const kv = env.KV as KVNamespace;
+const db = env.DB as D1Database;
+
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) return Astro.redirect('/admin/login');
+
+const requests = await getFileRequests(db, 50, 0);
+---
+
+<AdminLayout title="File Requests - Admin">
+  <div class="admin-card">
+    <h2>File Requests</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Tracking</th>
+          <th>Guest</th>
+          <th>Recipient</th>
+          <th>Files</th>
+          <th>Status</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        {requests.map((r) => (
+          <tr>
+            <td><code>{r.tracking_code ?? `#${r.request_id}`}</code></td>
+            <td>
+              {r.guest_id
+                ? <a href={`/admin/visitors?highlight=${r.guest_id}`} class="guest-link">Guest #{r.guest_id}</a>
+                : '-'}
+            </td>
+            <td><code>{r.recipient_email}</code></td>
+            <td>{JSON.parse(r.file_list).join(', ')}</td>
+            <td>
+              <span class={`badge badge-${r.status === 'sent' ? 'success' : r.status === 'failed' ? 'danger' : 'warning'}`}>
+                {r.status}
+              </span>
+            </td>
+            <td>{new Date(r.created_at).toLocaleString()}</td>
+          </tr>
+        ))}
+        {requests.length === 0 && (
+          <tr><td colspan="6" style="text-align:center;color:var(--admin-text-secondary)">No requests yet</td></tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+</AdminLayout>
+
+<style>
+  code {
+    font-size: 0.8rem;
+    background: var(--admin-bg);
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+  }
+
+  .guest-link {
+    color: var(--admin-primary, #2563eb);
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .guest-link:hover {
+    text-decoration: underline;
+  }
+</style>

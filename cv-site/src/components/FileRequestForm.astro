@@ -1,0 +1,559 @@
+---
+interface Props {
+  whitelist: string[];
+  availableFiles: { key: string; name: string }[];
+  turnstileEnabled?: boolean;
+  turnstileSiteKey?: string;
+}
+
+const { whitelist, availableFiles, turnstileEnabled = false, turnstileSiteKey = '' } = Astro.props;
+
+// Extract domains from whitelist entries (e.g. "@google.com" → "google.com")
+// Exact emails like "hr@company.com" → extract "company.com"
+const domains = [...new Set(
+  whitelist.map((entry) => {
+    if (entry.startsWith('@')) return entry.slice(1);
+    const atIdx = entry.indexOf('@');
+    return atIdx > -1 ? entry.slice(atIdx + 1) : entry;
+  })
+)];
+---
+
+<section class="file-request-form">
+  <h2>Request Documents</h2>
+  <p class="description">
+    Select the documents you need and choose an authorized recipient email.
+    Files will be sent directly to the selected address.
+  </p>
+
+  <form id="file-request-form">
+    <div class="form-field">
+      <label>Documents to Request</label>
+      <div class="file-checkboxes">
+        {availableFiles.map((file) => (
+          <label class="checkbox-label">
+            <input type="checkbox" name="files" value={file.key} />
+            <span>{file.name}</span>
+          </label>
+        ))}
+      </div>
+      {availableFiles.length === 0 && (
+        <p class="no-files">No documents are currently available for request.</p>
+      )}
+    </div>
+
+    <div class="form-field">
+      <label>Recipient Email</label>
+      {whitelist.length > 0 ? (
+        <div class="email-combo">
+          <input
+            type="text"
+            id="recipient-local"
+            placeholder="username"
+            required
+            autocomplete="off"
+          />
+          <span class="email-at">@</span>
+          <div class="domain-select-wrap">
+            <input
+              type="text"
+              id="recipient-domain-search"
+              placeholder="Search domain..."
+              autocomplete="off"
+            />
+            <ul id="domain-dropdown" class="domain-dropdown"></ul>
+          </div>
+          <input type="hidden" id="recipient-email" name="recipientEmail" />
+        </div>
+      ) : (
+        <input
+          type="email"
+          id="recipient-email"
+          name="recipientEmail"
+          required
+          placeholder="you@example.com"
+        />
+      )}
+      {whitelist.length === 0 && (
+        <small>Enter the email address to receive the documents.</small>
+      )}
+    </div>
+
+    {turnstileEnabled && turnstileSiteKey && (
+      <div id="request-turnstile" class="turnstile-container"></div>
+    )}
+
+    <button type="submit" class="submit-btn" id="request-submit">Submit Request</button>
+    <p id="request-status" class="form-status"></p>
+  </form>
+</section>
+
+<!-- Success modal -->
+<div id="success-modal" class="modal-overlay" style="display:none">
+  <div class="modal-card">
+    <div class="modal-icon">&#10003;</div>
+    <h3>Request Sent</h3>
+    <p>Your documents have been sent to the specified email address. Please check the inbox (and spam/junk folder) shortly.</p>
+    <p class="modal-hint">If you don't receive the email within a few minutes, please contact the site owner directly.</p>
+    <button id="modal-close" class="modal-btn">Got it</button>
+  </div>
+</div>
+
+{turnstileEnabled && turnstileSiteKey && (
+  <script
+    src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+    async
+    defer
+  ></script>
+)}
+
+<script define:vars={{ turnstileEnabled, turnstileSiteKey, domains }}>
+  document.addEventListener('DOMContentLoaded', () => {
+    let turnstileToken = '';
+
+    if (turnstileEnabled && turnstileSiteKey && typeof turnstile !== 'undefined') {
+      turnstile.render('#request-turnstile', {
+        sitekey: turnstileSiteKey,
+        callback: (token) => { turnstileToken = token; },
+      });
+    }
+
+    // Domain combo logic
+    var domainSearch = document.getElementById('recipient-domain-search');
+    var dropdown = document.getElementById('domain-dropdown');
+    var localInput = document.getElementById('recipient-local');
+    var hiddenEmail = document.getElementById('recipient-email');
+    var selectedDomain = '';
+
+    function renderDropdown(filter) {
+      if (!dropdown) return;
+      var filtered = domains.filter(function (d) {
+        return d.toLowerCase().includes((filter || '').toLowerCase());
+      });
+      dropdown.innerHTML = '';
+      filtered.forEach(function (d) {
+        var li = document.createElement('li');
+        li.textContent = d;
+        li.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          selectedDomain = d;
+          if (domainSearch) domainSearch.value = d;
+          dropdown.classList.remove('open');
+          syncHiddenEmail();
+        });
+        dropdown.appendChild(li);
+      });
+      if (filtered.length > 0) {
+        dropdown.classList.add('open');
+      } else {
+        dropdown.classList.remove('open');
+      }
+    }
+
+    function syncHiddenEmail() {
+      if (!hiddenEmail || !localInput) return;
+      if (selectedDomain && localInput.value.trim()) {
+        hiddenEmail.value = localInput.value.trim() + '@' + selectedDomain;
+      } else {
+        hiddenEmail.value = '';
+      }
+    }
+
+    if (domainSearch && dropdown) {
+      // Auto-select first domain
+      if (domains.length === 1) {
+        selectedDomain = domains[0];
+        domainSearch.value = domains[0];
+      }
+
+      domainSearch.addEventListener('focus', function () {
+        renderDropdown(domainSearch.value);
+      });
+      domainSearch.addEventListener('input', function () {
+        selectedDomain = '';
+        renderDropdown(domainSearch.value);
+      });
+      domainSearch.addEventListener('blur', function () {
+        setTimeout(function () { dropdown.classList.remove('open'); }, 150);
+      });
+    }
+
+    if (localInput) {
+      localInput.addEventListener('input', syncHiddenEmail);
+    }
+
+    // Form submit
+    document.getElementById('file-request-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      var btn = document.getElementById('request-submit');
+      var status = document.getElementById('request-status');
+
+      var checkboxes = document.querySelectorAll('input[name="files"]:checked');
+      var fileList = Array.from(checkboxes).map(function (cb) { return cb.value; });
+
+      if (fileList.length === 0) {
+        if (status) {
+          status.textContent = 'Please select at least one document.';
+          status.className = 'form-status error';
+        }
+        return;
+      }
+
+      // Build email: combo mode or plain input
+      var recipientEmail = '';
+      if (localInput && domainSearch) {
+        syncHiddenEmail();
+        recipientEmail = hiddenEmail ? hiddenEmail.value : '';
+        if (!localInput.value.trim()) {
+          if (status) {
+            status.textContent = 'Please enter a username.';
+            status.className = 'form-status error';
+          }
+          return;
+        }
+        if (!selectedDomain) {
+          if (status) {
+            status.textContent = 'Please select a domain.';
+            status.className = 'form-status error';
+          }
+          return;
+        }
+      } else {
+        var emailInput = document.getElementById('recipient-email');
+        recipientEmail = emailInput ? emailInput.value : '';
+      }
+
+      if (!recipientEmail) {
+        if (status) {
+          status.textContent = 'Please enter a valid email address.';
+          status.className = 'form-status error';
+        }
+        return;
+      }
+
+      if (btn) btn.textContent = 'Submitting...';
+
+      try {
+        var guestId = sessionStorage.getItem('cv-guest-id');
+        var headers = { 'Content-Type': 'application/json' };
+        if (guestId) headers['X-Guest-Id'] = guestId;
+
+        var res = await fetch('/api/request-file', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({
+            recipientEmail: recipientEmail,
+            fileList: fileList,
+            ...(turnstileToken && { turnstileToken: turnstileToken }),
+          }),
+        });
+
+        if (res.ok) {
+          document.getElementById('file-request-form')?.reset();
+          if (domainSearch && domains.length === 1) domainSearch.value = domains[0];
+          selectedDomain = domains.length === 1 ? domains[0] : '';
+          // Show success modal
+          var modal = document.getElementById('success-modal');
+          if (modal) modal.style.display = 'flex';
+        } else {
+          var err = await res.json();
+          if (status) {
+            status.textContent = err.error || 'Request failed.';
+            status.className = 'form-status error';
+          }
+        }
+      } catch (ex) {
+        if (status) {
+          status.textContent = 'Network error. Please try again.';
+          status.className = 'form-status error';
+        }
+      }
+
+      if (btn) btn.textContent = 'Submit Request';
+    });
+
+    // Modal close
+    document.getElementById('modal-close')?.addEventListener('click', function () {
+      var modal = document.getElementById('success-modal');
+      if (modal) modal.style.display = 'none';
+    });
+    document.getElementById('success-modal')?.addEventListener('click', function (e) {
+      if (e.target === this) this.style.display = 'none';
+    });
+  });
+</script>
+
+<style>
+  .file-request-form {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 3rem 2rem;
+  }
+
+  .file-request-form h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .description {
+    color: var(--color-text-secondary, #6b7280);
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+  }
+
+  .form-field {
+    margin-bottom: 1.5rem;
+  }
+
+  .form-field label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+  }
+
+  .file-checkboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 400;
+    cursor: pointer;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: 6px;
+    transition: border-color 0.15s;
+  }
+
+  .checkbox-label:hover {
+    border-color: var(--color-primary, #2563eb);
+  }
+
+  .no-files {
+    color: var(--color-text-secondary, #6b7280);
+    font-size: 0.85rem;
+    font-style: italic;
+  }
+
+  input[type="email"],
+  .email-combo input[type="text"] {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 0.9rem;
+    background: white;
+  }
+
+  input[type="email"] {
+    width: 100%;
+  }
+
+  input[type="email"]:focus,
+  .email-combo input[type="text"]:focus {
+    outline: none;
+    border-color: var(--color-primary, #2563eb);
+  }
+
+  .email-combo {
+    display: flex;
+    align-items: center;
+    gap: 0;
+  }
+
+  .email-combo #recipient-local {
+    flex: 1;
+    border-radius: 6px 0 0 6px;
+    border-right: none;
+    min-width: 0;
+  }
+
+  .email-at {
+    padding: 0.5rem 0.5rem;
+    background: var(--color-bg-secondary, #f9fafb);
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-left: none;
+    border-right: none;
+    font-size: 0.9rem;
+    color: var(--color-text-secondary, #6b7280);
+    user-select: none;
+    line-height: 1.4;
+  }
+
+  .domain-select-wrap {
+    flex: 1;
+    position: relative;
+    min-width: 0;
+  }
+
+  .domain-select-wrap input {
+    width: 100%;
+    border-radius: 0 6px 6px 0;
+    border-left: none;
+  }
+
+  .domain-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid var(--color-border, #e5e7eb);
+    border-radius: 8px;
+    list-style: none;
+    margin: 0;
+    padding: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+    z-index: 10;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06);
+  }
+
+  .domain-dropdown.open {
+    display: block;
+  }
+
+  .domain-dropdown li {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    border-radius: 5px;
+    transition: background 0.1s, color 0.1s;
+    font-family: var(--font-mono, monospace);
+    letter-spacing: 0.01em;
+  }
+
+  .domain-dropdown li:hover {
+    background: var(--color-primary, #2563eb);
+    color: white;
+  }
+
+  .domain-dropdown li + li {
+    margin-top: 2px;
+  }
+
+  small {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.8rem;
+    color: var(--color-text-secondary, #6b7280);
+  }
+
+  .submit-btn {
+    padding: 0.6rem 1.5rem;
+    background: var(--color-primary, #2563eb);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .submit-btn:hover {
+    opacity: 0.9;
+  }
+
+  .turnstile-container {
+    margin-bottom: 1rem;
+  }
+
+  .form-status {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .form-status.success {
+    color: #22c55e;
+  }
+
+  .form-status.error {
+    color: #ef4444;
+  }
+
+  /* Success modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+
+  .modal-card {
+    background: white;
+    border-radius: 14px;
+    padding: 2rem 2.25rem;
+    max-width: 420px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+    animation: modal-in 0.2s ease-out;
+  }
+
+  @keyframes modal-in {
+    from { opacity: 0; transform: scale(0.95) translateY(8px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  .modal-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 1rem;
+    background: #ecfdf5;
+    color: #22c55e;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+
+  .modal-card h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+    color: #1f2937;
+  }
+
+  .modal-card p {
+    font-size: 0.9rem;
+    color: #4b5563;
+    line-height: 1.6;
+    margin-bottom: 0.5rem;
+  }
+
+  .modal-hint {
+    font-size: 0.82rem;
+    color: #9ca3af;
+    margin-bottom: 1.25rem;
+  }
+
+  .modal-btn {
+    padding: 0.55rem 2rem;
+    background: var(--color-primary, #2563eb);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+
+  .modal-btn:hover {
+    opacity: 0.9;
+  }
+</style>

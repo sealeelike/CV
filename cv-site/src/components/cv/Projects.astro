@@ -1,0 +1,44 @@
+---
+interface ProjectItem {
+  name: string;
+  description: string;
+  url?: string;
+  highlights?: string[];
+}
+
+interface Props {
+  items: ProjectItem[];
+}
+
+const { items } = Astro.props;
+---
+
+<section class="cv-section cv-projects">
+  <h2 class="cv-section-title">Projects</h2>
+  <div class="cv-items-grid">
+    {items.map((project) => (
+      <div class="cv-item cv-project">
+        <h3>
+          {project.url ? (
+            <a href={project.url} target="_blank" rel="noopener noreferrer">
+              {project.name}
+            </a>
+          ) : (
+            project.name
+          )}
+        </h3>
+        <p>{project.description}</p>
+        {project.highlights && project.highlights.length > 0 && (
+          <ul class="cv-item-highlights">
+            {project.highlights.map((h) => (
+              <li>{h}</li>
+            ))}
+          </ul>
+        )}
+        <div class="cv-item-actions">
+          <a href="/request">Request Document <span class="arrow">&nearr;</span></a>
+        </div>
+      </div>
+    ))}
+  </div>
+</section>

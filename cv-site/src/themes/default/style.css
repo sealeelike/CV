@@ -1,0 +1,821 @@
+/* Default Theme v2.3 — Stitch "The Curated Manuscript" exact match */
+
+/* ── Top App Bar (sticky nav) ── */
+
+.top-app-bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.top-app-bar-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  max-width: 1536px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem;
+}
+
+.top-app-bar-brand {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-style: italic;
+  letter-spacing: -0.05em;
+  color: var(--color-text);
+}
+
+.top-app-bar-nav {
+  display: none;
+  gap: 2rem;
+  align-items: center;
+}
+
+.top-app-bar-link {
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  transition: color 0.3s, opacity 0.3s;
+}
+
+.top-app-bar-link:hover {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.top-app-bar-link.active {
+  color: var(--color-accent);
+  border-bottom: 1px solid var(--color-accent);
+  padding-bottom: 0.25rem;
+}
+
+.top-app-bar-btn {
+  margin-left: 1rem;
+  padding: 0.5rem 1.5rem;
+  background: var(--color-text);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-radius: 0.125rem;
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.top-app-bar-btn:hover {
+  opacity: 0.8;
+  text-decoration: none;
+  color: #fff;
+}
+
+.top-app-bar-btn:active {
+  transform: translateY(1px);
+}
+
+.top-app-bar-menu {
+  display: block;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text);
+  padding: 0.25rem;
+}
+
+@media (min-width: 768px) {
+  .top-app-bar-nav {
+    display: flex;
+  }
+  .top-app-bar-menu {
+    display: none;
+  }
+}
+
+/* ── Top bar left group (brand + variant dropdown) ── */
+
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+/* ── Variant switcher (dropdown) ── */
+
+.variant-switcher {
+  position: relative;
+}
+
+.variant-btn-active {
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  font-style: normal;
+  color: var(--color-text);
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0;
+  padding-bottom: 2px;
+  transition: color 0.3s;
+}
+
+.variant-btn-active:hover {
+  color: var(--color-accent);
+}
+
+.variant-expand {
+  font-size: 0.8rem;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.variant-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 0.5rem;
+  min-width: 6rem;
+  padding: 0.5rem 0;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, visibility 0.3s;
+  z-index: 60;
+}
+
+.variant-switcher:hover .variant-dropdown {
+  opacity: 1;
+  visibility: visible;
+}
+
+.variant-dropdown a {
+  display: block;
+  padding: 0.375rem 1rem;
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.variant-dropdown a:hover {
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.variant-dropdown a.active {
+  color: var(--color-text);
+  position: relative;
+}
+
+.variant-dropdown a.active::after {
+  content: '';
+  position: absolute;
+  bottom: 6px;
+  left: 1rem;
+  width: 1rem;
+  height: 1px;
+  background-color: var(--color-accent);
+}
+
+/* ── Page layout ── */
+
+.cv-page {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+
+  /* 12-column grid simulated as 2fr 1fr */
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  column-gap: 3rem;
+  row-gap: 4rem;
+  align-items: start;
+}
+
+/* Full-width sections span both columns */
+.cv-header,
+.cv-projects,
+.cv-awards,
+.cv-actions,
+.contact-form {
+  grid-column: 1 / -1;
+}
+
+/* Experience takes main left column */
+.cv-experience {
+  grid-column: 1;
+}
+
+/* Sidebar: education + skills stacked in right column */
+.cv-sidebar {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4rem;
+}
+
+/* ── Header ── */
+
+.cv-header {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+/* Split layout: avatar left, info right */
+.cv-header[data-style="split"] {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  column-gap: 2rem;
+  align-items: start;
+}
+
+.cv-header[data-style="split"] .avatar {
+  grid-row: 1 / 4;
+}
+
+.cv-header[data-style="split"] .header-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Left layout */
+.cv-header[data-style="left"] { text-align: left; }
+
+/* Centered layout */
+.cv-header[data-style="centered"] { text-align: center; }
+.cv-header[data-style="centered"] .avatar  { margin: 0 auto 1.25rem; }
+.cv-header[data-style="centered"] .summary { max-width: 600px; margin-left: auto; margin-right: auto; }
+.cv-header[data-style="centered"] .links   { justify-content: center; }
+
+/* Avatar */
+.cv-header .avatar {
+  width: 100px;
+  height: 100px;
+  border-radius: 0.5rem;
+  object-fit: cover;
+  display: block;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  border: 1px solid #c6c6c6;
+}
+
+/* Name — Stitch: text-4xl md:text-5xl font-bold tracking-tight */
+.cv-header h1 {
+  font-family: var(--font-heading);
+  font-size: 3rem;
+  font-weight: 700;
+  color: var(--color-text);
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin-bottom: 0;
+}
+
+/* Job title — Stitch: italic text-xl text-primary-fixed mt-2 */
+.cv-header .title {
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--color-accent);
+  margin-top: 0.5rem;
+  margin-bottom: 0;
+}
+
+/* Summary — Stitch: text-lg leading-relaxed mt-6 max-w-xl */
+.cv-header .summary {
+  color: var(--color-text-secondary);
+  font-size: 1.125rem;
+  line-height: 1.625;
+  margin-top: 1.5rem;
+  margin-bottom: 0;
+  max-width: 36rem;
+}
+
+/* Links row — Stitch: mt-8 text-xs tracking-widest text-outline */
+.cv-header .links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0;
+  margin-top: 2rem;
+}
+
+.cv-header .links a,
+.cv-header .links span.link-text,
+.cv-header .links button.copy-link {
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #777;
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+.cv-header .links a:hover,
+.cv-header .links button.copy-link:hover {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+/* Copy-to-clipboard button */
+.cv-header .links button.copy-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.cv-header .links button.copy-link.copied {
+  color: #059669;
+}
+
+.cv-header .links .link-sep {
+  color: var(--color-border);
+  font-size: 0.6rem;
+  margin: 0 0.5rem;
+  user-select: none;
+  opacity: 0.3;
+}
+
+/* ── Sections ── */
+
+.cv-section {
+  /* gap controlled by parent grid row-gap */
+}
+
+/* Section title — Stitch: font-headline text-xs uppercase tracking-[0.3em] text-outline mb-10 border-b border-outline-variant pb-2 */
+.cv-section-title {
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  margin-bottom: 2.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #c6c6c6;
+}
+
+/* ── Items (experience / education / awards) ── */
+
+/* Experience items — Stitch: space-y-12 (3rem) */
+.cv-experience .cv-item {
+  margin-bottom: 3rem;
+}
+
+.cv-experience .cv-item:last-child {
+  margin-bottom: 0;
+}
+
+/* General items */
+.cv-item {
+  margin-bottom: 1.5rem;
+}
+
+.cv-item:last-child {
+  margin-bottom: 0;
+}
+
+/* Item header — Stitch: flex flex-col md:flex-row md:justify-between md:items-baseline mb-3 */
+.cv-item-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+@media (min-width: 768px) {
+  .cv-experience .cv-item-header {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+}
+
+/* Item title — Stitch: font-headline text-xl font-bold */
+.cv-item-title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1.25rem;
+  color: var(--color-text);
+}
+
+/* Item subtitle — Stitch: font-headline italic text-outline ml-1 */
+.cv-item-subtitle {
+  font-family: var(--font-heading);
+  font-style: italic;
+  color: #777;
+  font-weight: 400;
+}
+
+/* Item date — Stitch: font-label text-[10px] uppercase tracking-wider text-outline */
+.cv-item-date {
+  font-family: var(--font-body);
+  color: #777;
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+/* Location — Stitch: font-label text-[10px] uppercase tracking-widest text-primary-fixed mb-4 */
+.cv-item-location {
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-accent);
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.cv-item-description {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.625;
+  margin-top: 0.35rem;
+}
+
+/* Highlights — Stitch: font-body text-sm text-on-surface-variant leading-relaxed, em-dash in indigo */
+.cv-item-highlights {
+  list-style: none;
+  padding-left: 0;
+  margin-top: 0;
+}
+
+.cv-item-highlights li {
+  display: flex;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.625;
+  margin-bottom: 0.5rem;
+}
+
+.cv-item-highlights li::before {
+  content: '\2014';
+  margin-right: 0.75rem;
+  color: var(--color-accent);
+  font-weight: 300;
+  flex-shrink: 0;
+}
+
+/* ── Education in sidebar — smaller sizes ── */
+
+.cv-sidebar .cv-education .cv-item {
+  margin-bottom: 2rem;
+}
+
+.cv-sidebar .cv-education .cv-item:last-child {
+  margin-bottom: 0;
+}
+
+.cv-sidebar .cv-education .cv-item-header {
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.cv-sidebar .cv-education .cv-item-title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.cv-sidebar .cv-education .cv-item-subtitle {
+  font-size: 0.875rem;
+}
+
+.cv-sidebar .cv-education .cv-item-date {
+  margin-top: 0.25rem;
+  color: #c6c6c6;
+}
+
+/* ── Skills (in sidebar) ── */
+
+.cv-skills-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+/* Skill category title — Stitch: font-label text-[10px] uppercase tracking-widest text-primary-fixed mb-3 */
+.cv-skill-category h3 {
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-accent);
+  margin-bottom: 0.75rem;
+}
+
+.cv-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Pill-shaped tags — Stitch: px-3 py-1 bg-surface-container-high text-[10px] tracking-widest rounded-full */
+.cv-tag {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  background: #ebe7e7;
+  border-radius: 0.75rem;
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-secondary);
+}
+
+/* ── Projects — 2-column card grid ── */
+/* Stitch: grid grid-cols-1 md:grid-cols-2 gap-8 */
+
+.cv-projects .cv-items-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+/* Stitch: p-6 bg-surface-container-low border border-outline-variant rounded-lg hover:border-primary-fixed */
+.cv-project {
+  padding: 1.5rem;
+  background: var(--color-bg-card);
+  border: 1px solid #c6c6c6;
+  border-radius: 0.25rem;
+  transition: border-color 0.2s;
+}
+
+.cv-project:hover {
+  border-color: var(--color-accent);
+}
+
+/* Stitch: font-headline font-bold text-lg mb-2 */
+.cv-project h3 {
+  font-family: var(--font-heading);
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: var(--color-text);
+}
+
+.cv-project h3 a {
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: currentColor;
+}
+
+.cv-project h3 a:hover {
+  color: var(--color-accent);
+  text-decoration-color: currentColor;
+}
+
+/* Stitch: font-body text-sm text-on-surface-variant mb-4 leading-relaxed */
+.cv-project p {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.625;
+  margin-bottom: 1rem;
+}
+
+/* Stitch: font-body text-xs text-on-surface-variant */
+.cv-project .cv-item-highlights li {
+  font-size: 0.75rem;
+}
+
+/* ── Awards ── */
+
+.cv-awards .cv-item {
+  margin-bottom: 1.5rem;
+}
+
+.cv-awards .cv-item:last-child {
+  margin-bottom: 0;
+}
+
+.cv-awards .cv-item-title {
+  font-size: 1.125rem;
+}
+
+/* ── Per-item "Request Document" link ── */
+/* Stitch: text-[10px] uppercase tracking-[0.2em] text-indigo hover:text-primary-fixed-dim */
+
+.cv-item-actions {
+  margin-top: 0.75rem;
+}
+
+.cv-item-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--color-accent);
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+.cv-item-actions a:hover {
+  color: #2f2ebe;
+  text-decoration: none;
+}
+
+.cv-item-actions .arrow {
+  display: inline-block;
+  font-size: 0.75rem;
+  transition: transform 0.2s;
+}
+
+.cv-item-actions a:hover .arrow {
+  transform: translate(2px, -2px);
+}
+
+/* ── Footer actions ── */
+
+.cv-actions {
+  padding-top: 1.5rem;
+  border-top: 1px solid #c6c6c6;
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cv-actions a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid #c6c6c6;
+  border-radius: 0.125rem;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+
+.cv-actions a:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+/* ── Site Footer ── */
+
+.site-footer {
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-border);
+  margin-top: 5rem;
+}
+
+.site-footer-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 1536px;
+  margin: 0 auto;
+  padding: 3rem 2rem;
+}
+
+@media (min-width: 768px) {
+  .site-footer-inner {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+}
+
+.site-footer-brand {
+  font-family: var(--font-heading);
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+
+.site-footer-copy {
+  font-family: var(--font-body);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--color-text-muted);
+}
+
+.site-footer-links {
+  display: flex;
+  gap: 2rem;
+}
+
+.site-footer-links a {
+  font-family: var(--font-body);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  text-underline-offset: 4px;
+  transition: color 0.3s;
+}
+
+.site-footer-links a:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+/* ── Print ── */
+
+@media print {
+  .top-app-bar,
+  .site-footer {
+    display: none !important;
+  }
+  .cv-page {
+    padding: 0;
+    max-width: none;
+    display: block;
+  }
+  .cv-sidebar {
+    display: none;
+  }
+  .cv-actions,
+  .contact-form {
+    display: none;
+  }
+  .cv-header {
+    page-break-after: avoid;
+  }
+  .cv-item {
+    page-break-inside: avoid;
+  }
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 640px) {
+  .cv-page {
+    padding: 2rem 1.25rem;
+    grid-template-columns: 1fr;
+    row-gap: 2.5rem;
+  }
+
+  .cv-experience,
+  .cv-sidebar {
+    grid-column: 1;
+  }
+
+  .cv-header[data-style="split"] {
+    grid-template-columns: 1fr;
+    text-align: center;
+  }
+
+  .cv-header[data-style="split"] .avatar {
+    margin: 0 auto 1rem;
+  }
+
+  .cv-header[data-style="split"] .header-info {
+    text-align: center;
+  }
+
+  .cv-header[data-style="split"] .links {
+    justify-content: center;
+  }
+
+  .cv-header h1 {
+    font-size: 2.25rem;
+  }
+
+  .cv-projects .cv-items-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cv-item-header {
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .top-app-bar-inner {
+    padding: 1rem 1.25rem;
+  }
+}

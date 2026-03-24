@@ -1,0 +1,73 @@
+{
+  "name": "Default",
+  "author": "cv-site",
+  "version": "2.4.0",
+  "variables": {
+    "--color-primary": "#111827",
+    "--color-primary-light": "#374151",
+    "--color-accent": "#6366f1",
+    "--color-accent-light": "#818cf8",
+    "--color-bg": "#fdfcfb",
+    "--color-bg-secondary": "#f0edec",
+    "--color-bg-card": "#f6f3f2",
+    "--color-text": "#1a1a1a",
+    "--color-text-secondary": "#4a4a4a",
+    "--color-text-muted": "#71717a",
+    "--color-border": "#e5e5e5",
+    "--color-border-light": "#ebe7e7",
+    "--font-heading": "'Noto Serif', 'Georgia', serif",
+    "--font-body": "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+    "--font-mono": "'JetBrains Mono', 'Fira Code', monospace",
+    "--border-radius": "2px",
+    "--section-gap": "2.5rem",
+    "--max-width": "780px"
+  },
+  "layout": {
+    "sections": ["header", "experience", "education", "skills", "projects", "awards"],
+    "sidebar": true,
+    "sidebarSections": ["education", "skills"],
+    "headerStyle": "split",
+    "fields": [
+      { "section": "experience", "required": true },
+      { "section": "education" },
+      { "section": "skills" },
+      { "section": "projects" },
+      { "section": "awards" }
+    ]
+  },
+  "fonts": [
+    "https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap"
+  ],
+  "languages": {
+    "en": {
+      "label": "English",
+      "fonts": [
+        "https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap"
+      ],
+      "strings": {
+        "navLinks": [
+          { "label": "Portfolio", "href": "#", "active": true },
+          { "label": "Contact", "href": "#contact" }
+        ],
+        "navDownload": "Download CV",
+        "footerBrand": "THE CURATED MANUSCRIPT",
+        "footerCopy": "ALL RIGHTS RESERVED."
+      }
+    },
+    "zh": {
+      "label": "中文",
+      "fonts": [
+        "https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap"
+      ],
+      "strings": {
+        "navLinks": [
+          { "label": "作品集", "href": "#", "active": true },
+          { "label": "联系方式", "href": "#contact" }
+        ],
+        "navDownload": "下载简历",
+        "footerBrand": "THE CURATED MANUSCRIPT",
+        "footerCopy": "版权所有."
+      }
+    }
+  }
+}

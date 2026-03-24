@@ -1,0 +1,671 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+
+const kv = env.KV as KVNamespace;
+
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) return Astro.redirect('/admin/login');
+---
+
+<AdminLayout title="Access Control - Admin">
+  <!-- Magic Link Management -->
+  <div class="admin-card" id="ml-section">
+    <div class="ml-header">
+      <h2>Magic Links</h2>
+      <button class="btn btn-primary" id="btn-create" type="button">+ New Link</button>
+    </div>
+
+    <!-- Create form (hidden by default) -->
+    <div id="create-form-wrap" style="display:none">
+      <form id="create-form" class="create-form">
+        <div class="create-grid">
+          <div class="form-group">
+            <label for="ml-token">Custom Token <small>(optional — leave blank for random)</small></label>
+            <input type="text" id="ml-token" placeholder="e.g. google-hr-2026" pattern="[a-zA-Z0-9_-]{4,128}" />
+            <small>4-128 chars: letters, numbers, hyphens, underscores</small>
+          </div>
+          <div class="form-group">
+            <label for="ml-label">Label / Notes</label>
+            <input type="text" id="ml-label" placeholder="e.g. Google HR — March 2026" />
+          </div>
+          <div class="form-group">
+            <label for="ml-expires">Expires At <small>(optional)</small></label>
+            <input type="datetime-local" id="ml-expires" />
+          </div>
+          <div class="form-group">
+            <label for="ml-max-uses">Max Uses <small>(optional — blank = unlimited)</small></label>
+            <input type="number" id="ml-max-uses" min="1" placeholder="Unlimited" />
+          </div>
+          <div class="form-group" style="display:flex;flex-direction:column;gap:0.25rem;justify-content:flex-end">
+            <label class="checkbox-toggle">
+              <input type="checkbox" id="ml-require-email" checked />
+              <span>Require email whitelist</span>
+            </label>
+            <small>Uncheck to allow any email for file requests</small>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Allowed Files <small>(unchecked = no file downloads for this link)</small></label>
+          <div id="create-files-list" class="files-checklist">Loading files...</div>
+        </div>
+        <div class="form-group">
+          <label>CV Assets <small>(add one or more — mark one as default; 2+ enables switcher on CV page)</small></label>
+          <div id="create-variants-list" class="variants-editor"></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-variant" style="margin-top:0.25rem">＋ Add Asset</button>
+        </div>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <button type="submit" class="btn btn-primary">Create</button>
+          <button type="button" class="btn btn-secondary" id="btn-cancel-create">Cancel</button>
+          <span id="create-status" class="save-status"></span>
+        </div>
+      </form>
+    </div>
+
+    <!-- Links table -->
+    <table id="ml-table">
+      <thead>
+        <tr>
+          <th>Token</th>
+          <th>Label</th>
+          <th>Asset</th>
+          <th>Uses</th>
+          <th>Expires</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="ml-tbody">
+        <tr><td colspan="7" class="empty-msg">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</AdminLayout>
+
+<script>
+  const siteOrigin = window.location.origin;
+
+  let allAssets: { asset_id: string; label: string }[] = [];
+  let allFiles: string[] = [];
+
+  // ---- Load assets + files ----
+  async function loadMeta() {
+    try {
+      const [assetRes, fileRes] = await Promise.all([
+        fetch('/api/admin/assets', { credentials: 'include' }),
+        fetch('/api/admin/files', { credentials: 'include' }),
+      ]);
+      const assetJson = await assetRes.json();
+      const fileJson = await fileRes.json();
+
+      if (assetJson.ok && Array.isArray(assetJson.data?.assets)) {
+        allAssets = assetJson.data.assets.map((a: any) => ({ asset_id: a.asset_id, label: a.label }));
+      }
+      if (fileJson.ok && Array.isArray(fileJson.data?.files)) {
+        // files API strips 'files/' prefix from key; restore it for consistent storage
+        allFiles = fileJson.data.files.map((f: any) => `files/${f.key}`);
+      }
+    } catch {
+      // Non-fatal: assets/files just won't populate in the form
+    }
+
+    // Populate create-form files checklist
+    renderFilesChecklist('create-files-list', []);
+  }
+
+  function renderFilesChecklist(containerId: string, selected: string[]) {
+    const el = document.getElementById(containerId)!;
+    if (allFiles.length === 0) {
+      el.innerHTML = '<span style="color:var(--admin-text-secondary);font-size:0.85rem">No files uploaded yet</span>';
+      return;
+    }
+    el.innerHTML = allFiles.map(f => {
+      const checked = selected.includes(f) ? 'checked' : '';
+      const name = f.replace(/^files\//, '');
+      return `<label class="file-check-item">
+        <input type="checkbox" name="allowed_file" value="${f}" ${checked} />
+        <span>${name}</span>
+      </label>`;
+    }).join('');
+  }
+
+  function getCheckedFiles(containerId: string): string[] {
+    const el = document.getElementById(containerId)!;
+    return Array.from(el.querySelectorAll('input[name="allowed_file"]:checked')).map(
+      (cb) => (cb as HTMLInputElement).value
+    );
+  }
+
+  // ---- Asset / Variant editor ----
+  function renderVariantsEditor(containerId: string, variants: { asset_id: string; label: string; is_default?: boolean }[]) {
+    const el = document.getElementById(containerId)!;
+    // Use a unique radio group name per container to avoid cross-form conflicts
+    const radioName = `default-asset-${containerId}`;
+    el.innerHTML = '';
+    variants.forEach((v, i) => {
+      const row = document.createElement('div');
+      row.className = 'variant-row';
+      row.innerHTML = `
+        <label class="variant-default-label" title="Default">
+          <input type="radio" name="${radioName}" class="variant-default" ${v.is_default ? 'checked' : ''} />
+        </label>
+        <select class="variant-asset">
+          <option value="">— Select asset —</option>
+          ${allAssets.map(a => `<option value="${a.asset_id}"${a.asset_id === v.asset_id ? ' selected' : ''}>${a.label}</option>`).join('')}
+        </select>
+        <input type="text" class="variant-label" value="${(v.label || '').replace(/"/g, '&quot;')}" placeholder="Label (e.g. EN, 中文)" />
+        <button type="button" class="btn btn-danger btn-sm variant-remove" data-idx="${i}">✕</button>
+      `;
+      el.appendChild(row);
+    });
+    // Auto-check first radio if none is default
+    if (variants.length > 0 && !variants.some(v => v.is_default)) {
+      const firstRadio = el.querySelector('.variant-default') as HTMLInputElement | null;
+      if (firstRadio) firstRadio.checked = true;
+    }
+    el.querySelectorAll('.variant-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt((btn as HTMLElement).dataset.idx!);
+        const wasDefault = variants[idx].is_default;
+        variants.splice(idx, 1);
+        if (wasDefault && variants.length > 0) variants[0].is_default = true;
+        renderVariantsEditor(containerId, variants);
+      });
+    });
+  }
+
+  function getVariantsFromEditor(containerId: string): { asset_id: string; label: string; is_default?: boolean }[] {
+    const el = document.getElementById(containerId)!;
+    const result: { asset_id: string; label: string; is_default?: boolean }[] = [];
+    el.querySelectorAll('.variant-row').forEach(row => {
+      const assetId = (row.querySelector('.variant-asset') as HTMLSelectElement).value;
+      const label = (row.querySelector('.variant-label') as HTMLInputElement).value.trim();
+      const isDefault = (row.querySelector('.variant-default') as HTMLInputElement).checked;
+      if (assetId && label) result.push({ asset_id: assetId, label, ...(isDefault && { is_default: true }) });
+    });
+    return result;
+  }
+
+  // ---- Create form ----
+  const btnCreate = document.getElementById('btn-create') as HTMLButtonElement;
+  const createWrap = document.getElementById('create-form-wrap')!;
+  const createForm = document.getElementById('create-form') as HTMLFormElement;
+  const createStatus = document.getElementById('create-status')!;
+  const mlTbody = document.getElementById('ml-tbody')!;
+
+  btnCreate.addEventListener('click', () => {
+    createWrap.style.display = createWrap.style.display === 'none' ? '' : 'none';
+  });
+  document.getElementById('btn-cancel-create')?.addEventListener('click', () => {
+    createWrap.style.display = 'none';
+  });
+
+  // Variant state for create form
+  let createVariants: { asset_id: string; label: string; is_default?: boolean }[] = [];
+  document.getElementById('btn-add-variant')?.addEventListener('click', () => {
+    createVariants.push({ asset_id: '', label: '', is_default: createVariants.length === 0 });
+    renderVariantsEditor('create-variants-list', createVariants);
+  });
+
+  createForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    createStatus.textContent = 'Creating...';
+    createStatus.style.color = '';
+
+    const customToken = (document.getElementById('ml-token') as HTMLInputElement).value.trim();
+    const label = (document.getElementById('ml-label') as HTMLInputElement).value.trim();
+    const expiresRaw = (document.getElementById('ml-expires') as HTMLInputElement).value;
+    const maxUsesRaw = (document.getElementById('ml-max-uses') as HTMLInputElement).value;
+    const allowedFiles = getCheckedFiles('create-files-list');
+    const requireEmail = (document.getElementById('ml-require-email') as HTMLInputElement).checked;
+    const variantAssets = getVariantsFromEditor('create-variants-list');
+
+    // Derive assetId from the default variant
+    const defaultVariant = variantAssets.find(v => v.is_default) || variantAssets[0];
+    const assetId = defaultVariant?.asset_id || '';
+
+    try {
+      const res = await fetch('/api/admin/magic-links', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(customToken && { customToken }),
+          ...(label && { label }),
+          ...(assetId && { assetId }),
+          ...(expiresRaw && { expiresAt: new Date(expiresRaw).toISOString() }),
+          ...(maxUsesRaw && { maxUses: parseInt(maxUsesRaw, 10) }),
+          allowedFiles,
+          requireEmail,
+          ...(variantAssets.length > 0 && { variantAssets }),
+        }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        createStatus.textContent = 'Created!';
+        createStatus.style.color = 'var(--admin-success)';
+        createForm.reset();
+        createVariants = [];
+        renderVariantsEditor('create-variants-list', createVariants);
+        renderFilesChecklist('create-files-list', []);
+        createWrap.style.display = 'none';
+        loadLinks();
+      } else {
+        createStatus.textContent = json.error || 'Failed';
+        createStatus.style.color = 'var(--admin-danger)';
+      }
+    } catch {
+      createStatus.textContent = 'Error';
+      createStatus.style.color = 'var(--admin-danger)';
+    }
+    setTimeout(() => { createStatus.textContent = ''; }, 4000);
+  });
+
+  // ---- Delete ----
+  async function deleteLink(linkId: string) {
+    if (!confirm('Delete this magic link? Existing holders will lose access.')) return;
+    await fetch(`/api/admin/magic-links?id=${linkId}`, { method: 'DELETE', credentials: 'include' });
+    loadLinks();
+  }
+
+  // ---- Copy ----
+  function copyLink(token: string) {
+    const url = `${siteOrigin}/api/verify-magic?token=${token}`;
+    navigator.clipboard.writeText(url).then(() => {
+      const btn = document.querySelector(`[data-copy-token="${token}"]`) as HTMLButtonElement;
+      if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      }
+    });
+  }
+
+  // ---- Load links ----
+  async function loadLinks() {
+    try {
+      const res = await fetch('/api/admin/magic-links', { credentials: 'include' });
+      const json = await res.json();
+      if (!json.ok) { mlTbody.innerHTML = '<tr><td colspan="7" class="empty-msg">Failed to load</td></tr>'; return; }
+
+      const links = json.data as any[];
+      if (links.length === 0) {
+        mlTbody.innerHTML = '<tr><td colspan="7" class="empty-msg">No magic links yet. Click "+ New Link" to create one.</td></tr>';
+        return;
+      }
+
+      mlTbody.innerHTML = links.map(l => {
+        const expired = l.expires_at && new Date(l.expires_at) < new Date();
+        const exhausted = l.max_uses !== null && l.use_count >= l.max_uses;
+        const statusCls = expired ? 'badge badge-danger' : exhausted ? 'badge badge-warning' : 'badge badge-success';
+        const statusText = expired ? 'Expired' : exhausted ? 'Exhausted' : 'Active';
+        const usesText = l.max_uses !== null ? `${l.use_count} / ${l.max_uses}` : `${l.use_count}`;
+        const expiresText = l.expires_at ? new Date(l.expires_at).toLocaleString() : 'Never';
+        const parsedVariants: { asset_id: string; label: string; is_default?: boolean }[] = l.variant_assets ? JSON.parse(l.variant_assets) : [];
+        const defaultV = parsedVariants.find(v => v.is_default) || parsedVariants[0];
+        const assetLabel = defaultV
+          ? (allAssets.find(a => a.asset_id === defaultV.asset_id)?.label ?? defaultV.label)
+          : '<span style="color:var(--admin-text-secondary)">None</span>';
+        const variantCount = parsedVariants.length > 1 ? ` <span class="badge badge-info" style="font-size:0.65rem;vertical-align:middle">${parsedVariants.length} variants</span>` : '';
+        const currentAllowedFiles: string[] = l.allowed_files ? JSON.parse(l.allowed_files) : [];
+
+        return `<tr>
+          <td>
+            <code class="token-code">${l.token.length > 20 ? l.token.slice(0, 16) + '...' : l.token}</code>
+            <button class="btn-copy" data-copy-token="${l.token}" title="Copy full link">Copy</button>
+            <span class="${statusCls}" style="margin-left:0.25rem">${statusText}</span>
+          </td>
+          <td>${l.label || '<span style="color:var(--admin-text-secondary)">—</span>'}${!l.require_email ? ' <span class="badge badge-warning" style="font-size:0.65rem;vertical-align:middle">No email req</span>' : ''}</td>
+          <td>${assetLabel}${variantCount}</td>
+          <td>${usesText}</td>
+          <td>${expiresText}</td>
+          <td>${new Date(l.created_at).toLocaleString()}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-secondary btn-sm" data-edit-id="${l.link_id}">Edit</button>
+            <button class="btn btn-danger btn-sm" data-delete-id="${l.link_id}">Delete</button>
+          </td>
+        </tr>
+        <tr class="edit-row" id="edit-${l.link_id}" style="display:none">
+          <td colspan="7">
+            <form class="edit-form" data-link-id="${l.link_id}">
+              <div class="edit-grid">
+                <div class="form-group">
+                  <label>Label / Notes</label>
+                  <input type="text" class="edit-label" value="${(l.label || '').replace(/"/g, '&quot;')}" />
+                </div>
+                <div class="form-group">
+                  <label>Expires At</label>
+                  <input type="datetime-local" class="edit-expires" value="${l.expires_at ? new Date(l.expires_at).toISOString().slice(0, 16) : ''}" />
+                </div>
+                <div class="form-group">
+                  <label>Max Uses <small>(blank = unlimited)</small></label>
+                  <input type="number" class="edit-max-uses" min="1" value="${l.max_uses ?? ''}" placeholder="Unlimited" />
+                </div>
+                <div class="form-group" style="display:flex;flex-direction:column;gap:0.25rem;justify-content:flex-end">
+                  <label class="checkbox-toggle">
+                    <input type="checkbox" class="edit-require-email" ${l.require_email ? 'checked' : ''} />
+                    <span>Require email whitelist</span>
+                  </label>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Allowed Files <small>(unchecked = no file downloads)</small></label>
+                <div class="edit-files-list files-checklist" data-link-id="${l.link_id}">
+                  ${allFiles.length === 0
+                    ? '<span style="color:var(--admin-text-secondary);font-size:0.85rem">No files uploaded yet</span>'
+                    : allFiles.map(f => {
+                        const name = f.replace(/^files\//, '');
+                        const checked = currentAllowedFiles.includes(f) ? 'checked' : '';
+                        return `<label class="file-check-item"><input type="checkbox" name="edit_allowed_file" value="${f}" ${checked} /><span>${name}</span></label>`;
+                      }).join('')
+                  }
+                </div>
+              </div>
+              <div class="form-group">
+                <label>CV Assets <small>(mark one as default; 2+ enables switcher)</small></label>
+                <div class="edit-variants-list variants-editor" id="edit-variants-${l.link_id}"></div>
+                <button type="button" class="btn btn-secondary btn-sm edit-add-variant" data-link-id="${l.link_id}" style="margin-top:0.25rem">＋ Add Asset</button>
+              </div>
+              <div style="display:flex;gap:0.5rem;align-items:center">
+                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                <button type="button" class="btn btn-secondary btn-sm edit-cancel" data-link-id="${l.link_id}">Cancel</button>
+                <span class="edit-status save-status" data-link-id="${l.link_id}"></span>
+              </div>
+            </form>
+          </td>
+        </tr>`;
+      }).join('');
+
+      // Init variant editors for each edit form
+      links.forEach(l => {
+        const currentVariants: { asset_id: string; label: string; is_default?: boolean }[] = l.variant_assets
+          ? JSON.parse(l.variant_assets)
+          : [];
+        renderVariantsEditor(`edit-variants-${l.link_id}`, currentVariants);
+
+        mlTbody.querySelector(`.edit-add-variant[data-link-id="${l.link_id}"]`)?.addEventListener('click', () => {
+          currentVariants.push({ asset_id: '', label: '', is_default: currentVariants.length === 0 });
+          renderVariantsEditor(`edit-variants-${l.link_id}`, currentVariants);
+        });
+      });
+
+      // Bind events
+      mlTbody.querySelectorAll('[data-copy-token]').forEach(btn => {
+        btn.addEventListener('click', () => copyLink((btn as HTMLElement).dataset.copyToken!));
+      });
+      mlTbody.querySelectorAll('[data-delete-id]').forEach(btn => {
+        btn.addEventListener('click', () => deleteLink((btn as HTMLElement).dataset.deleteId!));
+      });
+      mlTbody.querySelectorAll('[data-edit-id]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = (btn as HTMLElement).dataset.editId!;
+          const row = document.getElementById(`edit-${id}`);
+          if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
+        });
+      });
+      mlTbody.querySelectorAll('.edit-cancel').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = (btn as HTMLElement).dataset.linkId!;
+          const row = document.getElementById(`edit-${id}`);
+          if (row) row.style.display = 'none';
+        });
+      });
+      mlTbody.querySelectorAll('.edit-form').forEach(form => {
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const linkId = (form as HTMLElement).dataset.linkId!;
+          const statusEl = form.querySelector(`.edit-status[data-link-id="${linkId}"]`) as HTMLElement;
+          statusEl.textContent = 'Saving...';
+          statusEl.style.color = '';
+
+          const label = (form.querySelector('.edit-label') as HTMLInputElement).value.trim();
+          const expiresRaw = (form.querySelector('.edit-expires') as HTMLInputElement).value;
+          const maxUsesRaw = (form.querySelector('.edit-max-uses') as HTMLInputElement).value;
+          const allowedFiles = Array.from(
+            form.querySelectorAll('input[name="edit_allowed_file"]:checked')
+          ).map((cb) => (cb as HTMLInputElement).value);
+          const requireEmail = (form.querySelector('.edit-require-email') as HTMLInputElement).checked;
+          const variantAssets = getVariantsFromEditor(`edit-variants-${linkId}`);
+
+          // Derive assetId from the default variant
+          const defaultV = variantAssets.find(v => v.is_default) || variantAssets[0];
+          const assetId = defaultV?.asset_id || null;
+
+          const body: any = {
+            label: label || null,
+            assetId: assetId,
+            allowedFiles,
+            expiresAt: expiresRaw ? new Date(expiresRaw).toISOString() : null,
+            maxUses: maxUsesRaw ? parseInt(maxUsesRaw, 10) : null,
+            requireEmail,
+            variantAssets: variantAssets.length > 0 ? variantAssets : null,
+          };
+
+          try {
+            const res = await fetch(`/api/admin/magic-links?id=${linkId}`, {
+              method: 'PATCH',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            if (res.ok) {
+              statusEl.textContent = 'Saved!';
+              statusEl.style.color = 'var(--admin-success)';
+              setTimeout(() => loadLinks(), 800);
+            } else {
+              const json = await res.json();
+              statusEl.textContent = json.error || 'Failed';
+              statusEl.style.color = 'var(--admin-danger)';
+            }
+          } catch {
+            statusEl.textContent = 'Error';
+            statusEl.style.color = 'var(--admin-danger)';
+          }
+          setTimeout(() => { statusEl.textContent = ''; }, 3000);
+        });
+      });
+    } catch {
+      mlTbody.innerHTML = '<tr><td colspan="7" class="empty-msg">Failed to load</td></tr>';
+    }
+  }
+
+  // Init: run in parallel — links show immediately, asset names fill in after meta loads
+  loadLinks();
+  loadMeta().then(() => loadLinks());
+</script>
+
+<style>
+  .save-status {
+    font-size: 0.85rem;
+  }
+
+  .ml-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .ml-header h2 {
+    margin-bottom: 0;
+  }
+
+  .create-form {
+    background: var(--admin-bg);
+    border: 1px solid var(--admin-border);
+    border-radius: var(--admin-radius);
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .create-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem 1.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  @media (max-width: 640px) {
+    .create-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .create-form small {
+    color: var(--admin-text-secondary);
+    font-size: 0.75rem;
+  }
+
+  .token-code {
+    font-size: 0.8rem;
+    background: var(--admin-bg);
+    padding: 0.125rem 0.375rem;
+    border-radius: 4px;
+    word-break: break-all;
+  }
+
+  .btn-copy {
+    display: inline-block;
+    padding: 0.15rem 0.4rem;
+    font-size: 0.7rem;
+    border: 1px solid var(--admin-border);
+    border-radius: 4px;
+    background: white;
+    cursor: pointer;
+    color: var(--admin-primary);
+    margin-left: 0.25rem;
+    transition: background 0.1s;
+  }
+
+  .btn-copy:hover {
+    background: #f0f4ff;
+  }
+
+  .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .empty-msg {
+    text-align: center;
+    color: var(--admin-text-secondary);
+    padding: 2rem 0.75rem !important;
+  }
+
+  .edit-row td {
+    background: var(--admin-bg);
+    padding: 0.75rem 1rem !important;
+  }
+
+  .edit-form {
+    max-width: 700px;
+  }
+
+  .edit-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  @media (max-width: 900px) {
+    .edit-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .edit-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .edit-status {
+    font-size: 0.85rem;
+  }
+
+  .files-checklist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0.5rem;
+    border: 1px solid var(--admin-border);
+    border-radius: var(--admin-radius);
+    background: white;
+    min-height: 2.5rem;
+  }
+
+  .file-check-item {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--admin-border);
+    border-radius: 4px;
+    cursor: pointer;
+    background: var(--admin-bg);
+    transition: background 0.1s, border-color 0.1s;
+  }
+
+  .file-check-item:has(input:checked) {
+    border-color: var(--admin-primary);
+    background: color-mix(in srgb, var(--admin-primary) 8%, white);
+  }
+
+  .file-check-item input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+  }
+
+  .checkbox-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: normal;
+  }
+  .checkbox-toggle input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .variants-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .variant-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .variant-row select {
+    flex: 2;
+  }
+  .variant-row input[type="text"] {
+    flex: 1;
+  }
+  .variant-default-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    title: "Default";
+  }
+  .variant-default-label input[type="radio"] {
+    width: auto;
+    margin: 0;
+    cursor: pointer;
+    flex: none;
+  }
+  .badge-info {
+    background: #dbeafe;
+    color: #1d4ed8;
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+  }
+</style>

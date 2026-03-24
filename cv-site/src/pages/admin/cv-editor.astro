@@ -1,0 +1,566 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+
+const kv = env.KV as KVNamespace;
+
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) return Astro.redirect('/admin/login');
+---
+
+<AdminLayout title="CV Editor - Admin">
+  <div class="editor-layout">
+    <div class="editor-panel">
+      <div class="admin-card">
+        <div class="editor-header">
+          <h2>CV Editor</h2>
+          <div>
+            <button id="import-rxresume-btn" class="btn btn-secondary">Import rxresume JSON</button>
+            <input type="file" id="import-rxresume-file" accept=".json" style="display:none" />
+            <button id="load-sample" class="btn btn-secondary">Load Sample</button>
+            <button id="save-cv" class="btn btn-primary">Save</button>
+            <span id="save-status" class="save-status"></span>
+          </div>
+        </div>
+
+        <!-- Section tabs -->
+        <div class="section-tabs" id="section-tabs">
+          <button class="tab active" data-section="header">Header</button>
+          <button class="tab" data-section="experience">Experience</button>
+          <button class="tab" data-section="education">Education</button>
+          <button class="tab" data-section="skills">Skills</button>
+          <button class="tab" data-section="projects">Projects</button>
+          <button class="tab" data-section="json">Raw JSON</button>
+        </div>
+
+        <!-- Header section -->
+        <div class="section-panel" id="panel-header">
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" id="cv-name" placeholder="Your Name" />
+          </div>
+          <div class="form-group">
+            <label>Title</label>
+            <input type="text" id="cv-title" placeholder="Software Engineer" />
+          </div>
+          <div class="form-group">
+            <label>Summary</label>
+            <textarea id="cv-summary" rows="3" placeholder="Brief introduction..."></textarea>
+          </div>
+          <div class="form-group">
+            <label>Avatar</label>
+            <div style="display:flex;gap:0.5rem;align-items:center">
+              <input type="text" id="cv-avatar" placeholder="https://... or upload →" style="flex:1" />
+              <label class="btn btn-secondary" style="cursor:pointer;white-space:nowrap;margin:0">
+                Upload
+                <input type="file" id="cv-avatar-file" accept="image/*" style="display:none" />
+              </label>
+            </div>
+            <span id="cv-avatar-upload-status" style="font-size:0.8rem;margin-top:0.25rem;display:block"></span>
+          </div>
+          <div class="form-group">
+            <label>Links (one per line: label|url)</label>
+            <textarea id="cv-links" rows="3" placeholder="GitHub|https://github.com/you&#10;LinkedIn|https://linkedin.com/in/you"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Page Title</label>
+            <input type="text" id="cv-meta-title" placeholder="My CV" />
+          </div>
+          <div class="form-group">
+            <label>Language</label>
+            <input type="text" id="cv-meta-lang" placeholder="en" value="en" />
+          </div>
+        </div>
+
+        <!-- Experience section -->
+        <div class="section-panel hidden" id="panel-experience">
+          <div id="experience-items"></div>
+          <button class="btn btn-secondary" id="add-experience">+ Add Experience</button>
+        </div>
+
+        <!-- Education section -->
+        <div class="section-panel hidden" id="panel-education">
+          <div id="education-items"></div>
+          <button class="btn btn-secondary" id="add-education">+ Add Education</button>
+        </div>
+
+        <!-- Skills section -->
+        <div class="section-panel hidden" id="panel-skills">
+          <div id="skills-items"></div>
+          <button class="btn btn-secondary" id="add-skill-category">+ Add Category</button>
+        </div>
+
+        <!-- Projects section -->
+        <div class="section-panel hidden" id="panel-projects">
+          <div id="project-items"></div>
+          <button class="btn btn-secondary" id="add-project">+ Add Project</button>
+        </div>
+
+        <!-- Raw JSON -->
+        <div class="section-panel hidden" id="panel-json">
+          <textarea id="cv-json" rows="30" style="font-family:monospace;font-size:0.8rem;"></textarea>
+          <button class="btn btn-secondary" id="apply-json" style="margin-top:0.5rem;">Apply JSON</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview-panel">
+      <div class="admin-card">
+        <h2>Preview</h2>
+        <iframe id="preview-frame" src="/" style="width:100%;height:600px;border:1px solid var(--admin-border);border-radius:var(--admin-radius);"></iframe>
+      </div>
+    </div>
+  </div>
+</AdminLayout>
+
+<script>
+  // CV data state
+  let cvData: any = {
+    meta: { title: 'My CV', lang: 'en' },
+    header: { name: '', title: '', summary: '', avatar: '', links: [] },
+    experience: [],
+    education: [],
+    skills: [],
+    projects: [],
+  };
+
+  // Load existing CV data
+  async function loadCV() {
+    try {
+      const res = await fetch('/api/admin/cv', { credentials: 'include' });
+      const data = await res.json();
+      if (data.ok && data.data.cv) {
+        cvData = data.data.cv;
+        renderForm();
+      }
+    } catch (err) {
+      console.error('Failed to load CV:', err);
+    }
+  }
+
+  function renderForm() {
+    // Header
+    (document.getElementById('cv-name') as HTMLInputElement).value = cvData.header?.name || '';
+    (document.getElementById('cv-title') as HTMLInputElement).value = cvData.header?.title || '';
+    (document.getElementById('cv-summary') as HTMLTextAreaElement).value = cvData.header?.summary || '';
+    (document.getElementById('cv-avatar') as HTMLInputElement).value = cvData.header?.avatar || '';
+    (document.getElementById('cv-links') as HTMLTextAreaElement).value =
+      (cvData.header?.links || []).map((l: any) => `${l.label}|${l.url}`).join('\n');
+    (document.getElementById('cv-meta-title') as HTMLInputElement).value = cvData.meta?.title || 'My CV';
+    (document.getElementById('cv-meta-lang') as HTMLInputElement).value = cvData.meta?.lang || 'en';
+
+    // Experience
+    renderListSection('experience', cvData.experience || [], ['company', 'role', 'location', 'startDate', 'endDate', 'highlights']);
+    // Education
+    renderListSection('education', cvData.education || [], ['institution', 'degree', 'field', 'startDate', 'endDate', 'highlights']);
+    // Skills
+    renderSkills(cvData.skills || []);
+    // Projects
+    renderProjects(cvData.projects || []);
+    // JSON
+    (document.getElementById('cv-json') as HTMLTextAreaElement).value = JSON.stringify(cvData, null, 2);
+  }
+
+  function renderListSection(name: string, items: any[], fields: string[]) {
+    const container = document.getElementById(`${name}-items`)!;
+    container.innerHTML = items.map((item: any, i: number) => `
+      <div class="editor-item" data-index="${i}">
+        <div class="item-header">
+          <strong>#${i + 1}</strong>
+          <button class="btn btn-danger btn-sm" onclick="removeItem('${name}', ${i})">Remove</button>
+        </div>
+        ${fields.map(f => f === 'highlights'
+          ? `<div class="form-group"><label>${f}</label><textarea class="item-field" data-field="${f}" rows="3" placeholder="One per line">${(item[f] || []).join('\n')}</textarea></div>`
+          : `<div class="form-group"><label>${f}</label><input type="text" class="item-field" data-field="${f}" value="${item[f] || ''}" /></div>`
+        ).join('')}
+      </div>
+    `).join('');
+  }
+
+  function renderSkills(skills: any[]) {
+    const container = document.getElementById('skills-items')!;
+    container.innerHTML = skills.map((cat: any, i: number) => `
+      <div class="editor-item" data-index="${i}">
+        <div class="item-header">
+          <strong>#${i + 1}</strong>
+          <button class="btn btn-danger btn-sm" onclick="removeItem('skills', ${i})">Remove</button>
+        </div>
+        <div class="form-group"><label>Category</label><input type="text" class="skill-category" value="${cat.category || ''}" /></div>
+        <div class="form-group"><label>Skills (comma separated)</label><input type="text" class="skill-items" value="${(cat.items || []).join(', ')}" /></div>
+      </div>
+    `).join('');
+  }
+
+  function renderProjects(projects: any[]) {
+    const container = document.getElementById('project-items')!;
+    container.innerHTML = projects.map((p: any, i: number) => `
+      <div class="editor-item" data-index="${i}">
+        <div class="item-header">
+          <strong>#${i + 1}</strong>
+          <button class="btn btn-danger btn-sm" onclick="removeItem('projects', ${i})">Remove</button>
+        </div>
+        <div class="form-group"><label>Name</label><input type="text" class="project-name" value="${p.name || ''}" /></div>
+        <div class="form-group"><label>Description</label><textarea class="project-desc" rows="2">${p.description || ''}</textarea></div>
+        <div class="form-group"><label>URL</label><input type="text" class="project-url" value="${p.url || ''}" /></div>
+        <div class="form-group"><label>Highlights (one per line)</label><textarea class="project-highlights" rows="2">${(p.highlights || []).join('\n')}</textarea></div>
+      </div>
+    `).join('');
+  }
+
+  function collectFormData() {
+    // Header
+    cvData.meta = {
+      title: (document.getElementById('cv-meta-title') as HTMLInputElement).value || 'My CV',
+      lang: (document.getElementById('cv-meta-lang') as HTMLInputElement).value || 'en',
+    };
+    cvData.header = {
+      name: (document.getElementById('cv-name') as HTMLInputElement).value,
+      title: (document.getElementById('cv-title') as HTMLInputElement).value,
+      summary: (document.getElementById('cv-summary') as HTMLTextAreaElement).value,
+      avatar: (document.getElementById('cv-avatar') as HTMLInputElement).value || undefined,
+      links: (document.getElementById('cv-links') as HTMLTextAreaElement).value
+        .split('\n').filter(Boolean).map(line => {
+          const [label, ...rest] = line.split('|');
+          return { label: label.trim(), url: rest.join('|').trim() };
+        }),
+    };
+
+    // Experience
+    cvData.experience = collectListItems('experience', ['company', 'role', 'location', 'startDate', 'endDate', 'highlights']);
+    // Education
+    cvData.education = collectListItems('education', ['institution', 'degree', 'field', 'startDate', 'endDate', 'highlights']);
+
+    // Skills
+    const skillItems = document.querySelectorAll('#skills-items .editor-item');
+    cvData.skills = Array.from(skillItems).map(item => ({
+      category: (item.querySelector('.skill-category') as HTMLInputElement).value,
+      items: (item.querySelector('.skill-items') as HTMLInputElement).value.split(',').map((s: string) => s.trim()).filter(Boolean),
+    }));
+
+    // Projects
+    const projectItems = document.querySelectorAll('#project-items .editor-item');
+    cvData.projects = Array.from(projectItems).map(item => ({
+      name: (item.querySelector('.project-name') as HTMLInputElement).value,
+      description: (item.querySelector('.project-desc') as HTMLTextAreaElement).value,
+      url: (item.querySelector('.project-url') as HTMLInputElement).value || undefined,
+      highlights: (item.querySelector('.project-highlights') as HTMLTextAreaElement).value.split('\n').filter(Boolean),
+    }));
+  }
+
+  function collectListItems(name: string, fields: string[]) {
+    const items = document.querySelectorAll(`#${name}-items .editor-item`);
+    return Array.from(items).map(item => {
+      const obj: any = {};
+      fields.forEach(f => {
+        const el = item.querySelector(`[data-field="${f}"]`) as HTMLInputElement | HTMLTextAreaElement;
+        if (!el) return;
+        if (f === 'highlights') {
+          obj[f] = el.value.split('\n').filter(Boolean);
+        } else {
+          obj[f] = el.value || undefined;
+        }
+      });
+      return obj;
+    });
+  }
+
+  // Remove item
+  (window as any).removeItem = function(section: string, index: number) {
+    collectFormData();
+    if (Array.isArray(cvData[section])) {
+      cvData[section].splice(index, 1);
+    }
+    renderForm();
+  };
+
+  // Tab switching
+  document.getElementById('section-tabs')?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('.tab') as HTMLElement;
+    if (!btn) return;
+    const section = btn.dataset.section!;
+
+    // Collect data before switching
+    collectFormData();
+
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.section-panel').forEach(p => p.classList.add('hidden'));
+    document.getElementById(`panel-${section}`)?.classList.remove('hidden');
+
+    if (section === 'json') {
+      (document.getElementById('cv-json') as HTMLTextAreaElement).value = JSON.stringify(cvData, null, 2);
+    }
+  });
+
+  // Add buttons
+  document.getElementById('add-experience')?.addEventListener('click', () => {
+    collectFormData();
+    cvData.experience.push({ company: '', role: '', startDate: '', highlights: [] });
+    renderForm();
+  });
+
+  document.getElementById('add-education')?.addEventListener('click', () => {
+    collectFormData();
+    cvData.education.push({ institution: '', degree: '', startDate: '' });
+    renderForm();
+  });
+
+  document.getElementById('add-skill-category')?.addEventListener('click', () => {
+    collectFormData();
+    cvData.skills.push({ category: '', items: [] });
+    renderForm();
+  });
+
+  document.getElementById('add-project')?.addEventListener('click', () => {
+    collectFormData();
+    cvData.projects.push({ name: '', description: '' });
+    renderForm();
+  });
+
+  // Apply JSON
+  document.getElementById('apply-json')?.addEventListener('click', () => {
+    try {
+      cvData = JSON.parse((document.getElementById('cv-json') as HTMLTextAreaElement).value);
+      renderForm();
+    } catch {
+      alert('Invalid JSON');
+    }
+  });
+
+  // Save
+  document.getElementById('save-cv')?.addEventListener('click', async () => {
+    collectFormData();
+    const status = document.getElementById('save-status')!;
+    status.textContent = 'Saving...';
+
+    try {
+      const res = await fetch('/api/admin/cv', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cv: cvData }),
+      });
+      if (res.ok) {
+        status.textContent = 'Saved!';
+        status.style.color = 'var(--admin-success)';
+        // Refresh preview
+        (document.getElementById('preview-frame') as HTMLIFrameElement).src = '/';
+      } else {
+        status.textContent = 'Failed';
+        status.style.color = 'var(--admin-danger)';
+      }
+    } catch {
+      status.textContent = 'Error';
+      status.style.color = 'var(--admin-danger)';
+    }
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  });
+
+  // Load sample
+  document.getElementById('load-sample')?.addEventListener('click', () => {
+    cvData = {
+      meta: { title: 'Jane Doe - CV', lang: 'en' },
+      header: {
+        name: 'Jane Doe',
+        title: 'Full-Stack Developer',
+        summary: 'Passionate developer with 5+ years of experience building web applications.',
+        links: [
+          { label: 'GitHub', url: 'https://github.com/janedoe' },
+          { label: 'LinkedIn', url: 'https://linkedin.com/in/janedoe' },
+          { label: 'Email', url: 'mailto:jane@example.com' },
+        ],
+      },
+      experience: [
+        {
+          company: 'Tech Corp',
+          role: 'Senior Developer',
+          location: 'San Francisco, CA',
+          startDate: '2022',
+          endDate: undefined,
+          highlights: ['Led team of 5 engineers', 'Reduced load time by 40%'],
+        },
+        {
+          company: 'Startup Inc',
+          role: 'Full-Stack Developer',
+          location: 'Remote',
+          startDate: '2019',
+          endDate: '2022',
+          highlights: ['Built MVP from scratch', 'Managed CI/CD pipeline'],
+        },
+      ],
+      education: [
+        {
+          institution: 'University of Technology',
+          degree: 'B.Sc.',
+          field: 'Computer Science',
+          startDate: '2015',
+          endDate: '2019',
+          highlights: ['Dean\'s List', 'Thesis on distributed systems'],
+        },
+      ],
+      skills: [
+        { category: 'Languages', items: ['TypeScript', 'Python', 'Rust', 'Go'] },
+        { category: 'Frontend', items: ['React', 'Svelte', 'Astro', 'CSS'] },
+        { category: 'Backend', items: ['Node.js', 'PostgreSQL', 'Redis'] },
+        { category: 'Tools', items: ['Git', 'Docker', 'Kubernetes', 'AWS'] },
+      ],
+      projects: [
+        {
+          name: 'OpenLib',
+          description: 'Open-source library management system',
+          url: 'https://github.com/janedoe/openlib',
+          highlights: ['500+ stars on GitHub', 'Used by 50+ libraries'],
+        },
+      ],
+    };
+    renderForm();
+  });
+
+  // Avatar upload
+  document.getElementById('cv-avatar-file')?.addEventListener('change', async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+    const status = document.getElementById('cv-avatar-upload-status')!;
+    status.textContent = 'Uploading...';
+    status.style.color = '';
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/admin/avatar', { method: 'POST', credentials: 'include', body: fd });
+      const data = await res.json();
+      if (data.ok) {
+        (document.getElementById('cv-avatar') as HTMLInputElement).value = data.data.url;
+        cvData.header.avatar = data.data.url;
+        status.textContent = 'Uploaded!';
+        status.style.color = 'var(--admin-success)';
+      } else {
+        status.textContent = data.error || 'Failed';
+        status.style.color = 'var(--admin-danger)';
+      }
+    } catch {
+      status.textContent = 'Error';
+      status.style.color = 'var(--admin-danger)';
+    }
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  });
+
+  // Import rxresume JSON
+  document.getElementById('import-rxresume-btn')?.addEventListener('click', () => {
+    (document.getElementById('import-rxresume-file') as HTMLInputElement).click();
+  });
+
+  document.getElementById('import-rxresume-file')?.addEventListener('change', async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    const status = document.getElementById('save-status')!;
+    status.textContent = 'Importing...';
+    status.style.color = '';
+
+    try {
+      const text = await file.text();
+      const raw = JSON.parse(text);
+
+      const res = await fetch('/api/admin/import-rxresume', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(raw),
+      });
+      const data = await res.json();
+
+      if (data.ok && data.data?.cv) {
+        cvData = data.data.cv;
+        renderForm();
+        status.textContent = 'Imported! Review and click Save.';
+        status.style.color = 'var(--admin-success)';
+      } else {
+        status.textContent = data.error || 'Import failed';
+        status.style.color = 'var(--admin-danger)';
+      }
+    } catch (err) {
+      status.textContent = 'Import error';
+      status.style.color = 'var(--admin-danger)';
+    }
+
+    // Reset file input so same file can be re-imported
+    (e.target as HTMLInputElement).value = '';
+    setTimeout(() => { status.textContent = ''; }, 5000);
+  });
+
+  loadCV();
+</script>
+
+<style>
+  .editor-layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+
+  @media (max-width: 1024px) {
+    .editor-layout {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .section-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .tab {
+    padding: 0.375rem 0.75rem;
+    border: 1px solid var(--admin-border);
+    border-radius: var(--admin-radius);
+    background: white;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+
+  .tab.active {
+    background: var(--admin-primary);
+    color: white;
+    border-color: var(--admin-primary);
+  }
+
+  .hidden {
+    display: none;
+  }
+
+  .editor-item {
+    border: 1px solid var(--admin-border);
+    border-radius: var(--admin-radius);
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+
+  .btn-sm {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .save-status {
+    margin-left: 0.5rem;
+    font-size: 0.85rem;
+  }
+</style>

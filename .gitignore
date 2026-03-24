@@ -1,0 +1,9 @@
+privateContent/
+
+# Internal docs (keep locally)
+FEEDBACK.md
+IMPLEMENTATION_PLAN.md
+initIdea.md
+requirements.md
+dev-notes/
+wiki

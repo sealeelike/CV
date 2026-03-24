@@ -1,0 +1,35 @@
+{
+  "name": "Minimal",
+  "author": "cv-site",
+  "version": "1.0.0",
+  "variables": {
+    "--color-primary": "#000000",
+    "--color-primary-light": "#333333",
+    "--color-bg": "#ffffff",
+    "--color-bg-secondary": "#fafafa",
+    "--color-text": "#111111",
+    "--color-text-secondary": "#555555",
+    "--color-border": "#eeeeee",
+    "--color-accent": "#000000",
+    "--font-heading": "'EB Garamond', Georgia, serif",
+    "--font-body": "'EB Garamond', Georgia, serif",
+    "--border-radius": "0px",
+    "--section-gap": "1.5rem",
+    "--max-width": "700px"
+  },
+  "layout": {
+    "sections": ["header", "experience", "education", "skills", "projects", "awards"],
+    "sidebar": false,
+    "headerStyle": "left",
+    "fields": [
+      { "section": "experience", "required": true },
+      { "section": "education" },
+      { "section": "skills" },
+      { "section": "projects" },
+      { "section": "awards" }
+    ]
+  },
+  "fonts": [
+    "https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap"
+  ]
+}

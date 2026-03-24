@@ -1,0 +1,43 @@
+---
+interface Props {
+  siteKey: string;
+  formId?: string;
+}
+
+const { siteKey, formId } = Astro.props;
+const containerId = `turnstile-${formId ?? 'default'}`;
+---
+
+<div id={containerId} class="turnstile-widget"></div>
+
+<script
+  src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+  async
+  defer
+></script>
+
+<script define:vars={{ containerId, siteKey }}>
+  function initTurnstile() {
+    if (typeof turnstile !== 'undefined' && document.getElementById(containerId)) {
+      turnstile.render(`#${containerId}`, {
+        sitekey: siteKey,
+        callback: (token) => {
+          // Store token in a hidden input or data attribute
+          const container = document.getElementById(containerId);
+          if (container) container.dataset.token = token;
+        },
+      });
+    } else {
+      setTimeout(initTurnstile, 100);
+    }
+  }
+  document.addEventListener('DOMContentLoaded', initTurnstile);
+</script>
+
+<style>
+  .turnstile-widget {
+    display: flex;
+    justify-content: center;
+    margin: 1rem 0;
+  }
+</style>

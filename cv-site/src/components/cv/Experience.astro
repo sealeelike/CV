@@ -1,0 +1,44 @@
+---
+interface ExperienceItem {
+  company: string;
+  role: string;
+  location?: string;
+  startDate: string;
+  endDate?: string;
+  highlights: string[];
+}
+
+interface Props {
+  items: ExperienceItem[];
+}
+
+const { items } = Astro.props;
+---
+
+<section class="cv-section cv-experience">
+  <h2 class="cv-section-title">Experience</h2>
+  {items.map((item) => (
+    <div class="cv-item">
+      <div class="cv-item-header">
+        <div>
+          <span class="cv-item-title">{item.role}</span>
+          <span class="cv-item-subtitle"> at {item.company}</span>
+        </div>
+        <span class="cv-item-date">
+          {item.startDate} — {item.endDate ?? 'Present'}
+        </span>
+      </div>
+      {item.location && <div class="cv-item-location">{item.location}</div>}
+      {item.highlights.length > 0 && (
+        <ul class="cv-item-highlights">
+          {item.highlights.map((h) => (
+            <li>{h}</li>
+          ))}
+        </ul>
+      )}
+      <div class="cv-item-actions">
+        <a href="/request">Request Document <span class="arrow">&nearr;</span></a>
+      </div>
+    </div>
+  ))}
+</section>

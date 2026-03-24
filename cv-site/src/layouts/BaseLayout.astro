@@ -1,0 +1,94 @@
+---
+interface Props {
+  title?: string;
+  lang?: string;
+  themeCSS?: string;
+  themeVars?: Record<string, string>;
+  fonts?: string[];
+}
+
+const {
+  title = 'CV',
+  lang = 'en',
+  themeCSS = '',
+  themeVars = {},
+  fonts = [],
+} = Astro.props;
+
+// Build CSS variables string
+const cssVarsString = Object.entries(themeVars)
+  .map(([key, value]) => `${key}: ${value};`)
+  .join('\n    ');
+---
+
+<!DOCTYPE html>
+<html lang={lang}>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+
+    {fonts.map((fontUrl) => (
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+      <link href={fontUrl} rel="stylesheet" />
+    ))}
+
+    <style is:global define:vars={themeVars}>
+      :root {
+        /* Default theme variables - can be overridden by theme */
+        --color-primary: #111827;
+        --color-primary-light: #374151;
+        --color-accent: #6366f1;
+        --color-accent-light: #818cf8;
+        --color-bg: #ffffff;
+        --color-bg-secondary: #f8f9fa;
+        --color-text: #111827;
+        --color-text-secondary: #4b5563;
+        --color-text-muted: #9ca3af;
+        --color-border: #e5e7eb;
+        --color-border-light: #f3f4f6;
+        --font-heading: 'Noto Serif', 'Georgia', serif;
+        --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+        --border-radius: 4px;
+        --section-gap: 2.25rem;
+        --max-width: 780px;
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-body);
+        color: var(--color-text);
+        background-color: var(--color-bg);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      a {
+        color: var(--color-primary);
+        text-decoration: none;
+      }
+
+      a:hover {
+        color: var(--color-primary-light);
+        text-decoration: underline;
+      }
+    </style>
+
+    {themeCSS && <style set:html={themeCSS} />}
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

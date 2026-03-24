@@ -1,0 +1,129 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+
+const kv = env.KV as KVNamespace;
+
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) return Astro.redirect('/admin/login');
+---
+
+<AdminLayout title="Files - Admin">
+  <div class="admin-card">
+    <h2>Upload Document</h2>
+    <form id="upload-form" enctype="multipart/form-data">
+      <div class="form-group">
+        <label for="file-input">Choose files (PDF recommended)</label>
+        <input type="file" id="file-input" name="file" accept=".pdf,.doc,.docx,.png,.jpg" multiple />
+      </div>
+      <button type="submit" class="btn btn-primary">Upload</button>
+      <p id="upload-status" style="margin-top:0.5rem;font-size:0.85rem;"></p>
+    </form>
+  </div>
+
+  <div class="admin-card">
+    <h2>Stored Files</h2>
+    <div id="file-list">Loading...</div>
+  </div>
+</AdminLayout>
+
+<script>
+  async function loadFiles() {
+    const container = document.getElementById('file-list')!;
+    try {
+      const res = await fetch('/api/admin/files', { credentials: 'include' });
+      const data = await res.json();
+      if (data.ok && data.data.files.length > 0) {
+        container.innerHTML = `
+          <table>
+            <thead><tr><th>Name</th><th>Size</th><th>Uploaded</th><th>Action</th></tr></thead>
+            <tbody>
+              ${data.data.files.map((f: any) => `
+                <tr>
+                  <td>${f.key}</td>
+                  <td>${(f.size / 1024).toFixed(1)} KB</td>
+                  <td>${new Date(f.uploaded).toLocaleString()}</td>
+                  <td><button class="btn btn-danger btn-sm" onclick="deleteFile('${f.key}')">Delete</button></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } else {
+        container.innerHTML = '<p style="color:var(--admin-text-secondary)">No files uploaded yet</p>';
+      }
+    } catch {
+      container.innerHTML = '<p style="color:var(--admin-danger)">Failed to load files</p>';
+    }
+  }
+
+  async function deleteFile(key: string) {
+    if (!confirm(`Delete ${key}?`)) return;
+    await fetch('/api/admin/files', {
+      method: 'DELETE',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    loadFiles();
+  }
+
+  // Make deleteFile available globally for onclick
+  (window as any).deleteFile = deleteFile;
+
+  document.getElementById('upload-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('file-input') as HTMLInputElement;
+    const status = document.getElementById('upload-status')!;
+    const files = input.files;
+    if (!files || files.length === 0) return;
+
+    const total = files.length;
+    let succeeded = 0;
+    let failed = 0;
+    status.textContent = `Uploading ${total} file(s)...`;
+    status.style.color = '';
+
+    for (const file of Array.from(files)) {
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetch('/api/admin/files', {
+          method: 'POST',
+          credentials: 'include',
+          body: formData,
+        });
+        if (res.ok) {
+          succeeded++;
+        } else {
+          const err = await res.json().catch(() => ({}));
+          console.error(`Upload failed for ${file.name}:`, res.status, err);
+          failed++;
+        }
+      } catch {
+        failed++;
+      }
+      status.textContent = `Uploading... ${succeeded + failed}/${total}`;
+    }
+
+    if (failed === 0) {
+      status.textContent = `${succeeded} file(s) uploaded!`;
+      status.style.color = 'var(--admin-success)';
+    } else {
+      status.textContent = `${succeeded} uploaded, ${failed} failed`;
+      status.style.color = 'var(--admin-danger)';
+    }
+    input.value = '';
+    loadFiles();
+  });
+
+  loadFiles();
+</script>
+
+<style>
+  .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+  }
+</style>

@@ -1,0 +1,75 @@
+---
+import { env } from 'cloudflare:workers';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import FileRequestForm from '../components/FileRequestForm.astro';
+import { getActiveTheme } from '../lib/kv.ts';
+import { loadTheme } from '../lib/theme.ts';
+import { getEmailConfig } from '../lib/email.ts';
+import { getTurnstileConfig } from '../lib/turnstile.ts';
+import type { TurnstileConfig } from '../types/index.ts';
+
+const kv = env.KV as KVNamespace;
+const r2 = env.R2 as R2Bucket;
+const db = env.DB as D1Database;
+
+// Read magic_link cookie → access control + allowed_files restriction
+const cookieHeader = Astro.request.headers.get('Cookie') ?? '';
+const magicMatch = cookieHeader.match(/(?:^|;\s*)magic_link=([^;]+)/);
+const magicLinkId = magicMatch ? magicMatch[1] : null;
+
+// Require magic link cookie to access this page
+if (!magicLinkId) return Astro.redirect('/');
+
+// Load theme
+const themeName = await getActiveTheme(kv);
+const theme = await loadTheme(themeName, r2);
+
+// Load email config for whitelist
+const emailConfig = await getEmailConfig(kv);
+const whitelist = emailConfig?.whitelist ?? [];
+
+let allowedFileKeys: string[] | null = null;
+let skipWhitelist = false;
+if (magicLinkId) {
+  const link = await db
+    .prepare('SELECT allowed_files, require_email FROM magic_links WHERE link_id = ?')
+    .bind(magicLinkId)
+    .first<{ allowed_files: string | null; require_email: number }>();
+  if (link?.allowed_files) {
+    allowedFileKeys = JSON.parse(link.allowed_files); // e.g. ["files/resume.pdf"]
+  }
+  if (link && !link.require_email) {
+    skipWhitelist = true;
+  }
+}
+
+// Load available files from R2, filtered by allowed_files if set
+const fileList = await r2.list({ prefix: 'files/' });
+const allFiles = fileList.objects.map((obj) => ({
+  key: obj.key.replace('files/', ''),
+  name: obj.key.replace('files/', '').replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '),
+}));
+const availableFiles = allowedFileKeys
+  ? allFiles.filter((f) => allowedFileKeys!.includes(`files/${f.key}`))
+  : allFiles;
+
+// Turnstile
+const turnstileConfig: TurnstileConfig | null = await getTurnstileConfig(kv);
+---
+
+<BaseLayout
+  title="Request Documents"
+  themeCSS={theme.css}
+  themeVars={theme.config.variables}
+  fonts={theme.config.fonts}
+>
+  <FileRequestForm
+    whitelist={skipWhitelist ? [] : whitelist}
+    availableFiles={availableFiles}
+    turnstileEnabled={turnstileConfig?.enabled ?? false}
+    turnstileSiteKey={turnstileConfig?.siteKey ?? ''}
+  />
+  <div style="text-align:center;padding:1rem;">
+    <a href="/" style="font-size:0.85rem;color:var(--color-text-secondary);">Back to CV</a>
+  </div>
+</BaseLayout>

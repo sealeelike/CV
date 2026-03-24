@@ -1,0 +1,420 @@
+---
+import { env } from 'cloudflare:workers';
+import AdminLayout from '../../layouts/AdminLayout.astro';
+import { requireAdmin } from '../../lib/auth.ts';
+
+const kv = env.KV as KVNamespace;
+
+const isAuthed = await requireAdmin(Astro.request, kv);
+if (!isAuthed) return Astro.redirect('/admin/login');
+---
+
+<AdminLayout title="Settings - Admin">
+  <div id="settings-app">
+    <!-- Telegram -->
+    <div class="admin-card">
+      <h2>Telegram Notifications</h2>
+      <form id="telegram-form">
+        <div class="form-group">
+          <label for="tg-bot-token">Bot Token</label>
+          <input type="text" id="tg-bot-token" placeholder="123456:ABC-DEF..." />
+        </div>
+        <div class="form-group">
+          <label for="tg-chat-id">Chat ID</label>
+          <input type="text" id="tg-chat-id" placeholder="-1001234567890" />
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="tg-enabled" /> Enabled
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Telegram</button>
+        <span id="tg-status" class="save-status"></span>
+      </form>
+    </div>
+
+    <!-- Email / Resend -->
+    <div class="admin-card">
+      <h2>Email (Resend)</h2>
+      <form id="email-form">
+        <div class="form-group">
+          <label for="email-api-key">Resend API Key</label>
+          <input type="text" id="email-api-key" placeholder="re_..." />
+        </div>
+        <div class="form-group">
+          <label for="email-from">From Address</label>
+          <input type="email" id="email-from" placeholder="cv@yourdomain.com" />
+        </div>
+        <div class="form-group">
+          <label for="email-from-name">From Name</label>
+          <input type="text" id="email-from-name" placeholder="Your Name" />
+        </div>
+        <div class="form-group">
+          <label for="email-whitelist">Recipient Whitelist (one per line, use @domain.com for domain match)</label>
+          <textarea id="email-whitelist" rows="4" placeholder="hr@company.com&#10;@google.com"></textarea>
+        </div>
+        <div class="form-group">
+          <label for="email-delivery-subject">Delivery Email Subject</label>
+          <input type="text" id="email-delivery-subject" placeholder={'Your Requested Documents — {{trackingCode}}'} />
+          <small>Placeholders: <code>{'{{trackingCode}}'}</code> = unique per request &nbsp; <code>{'{{files}}'}</code> = file names &nbsp; <code>{'{{domain}}'}</code> = your site domain</small>
+        </div>
+        <div class="form-group">
+          <div class="body-label-row">
+            <label>Delivery Email Body</label>
+            <div class="body-toolbar">
+              <button type="button" class="tb-btn" data-cmd="bold" title="Bold"><b>B</b></button>
+              <button type="button" class="tb-btn" data-cmd="italic" title="Italic"><i>I</i></button>
+              <button type="button" class="tb-btn" data-cmd="underline" title="Underline"><u>U</u></button>
+              <span class="tb-sep"></span>
+              <button type="button" class="tb-btn" data-cmd="insertUnorderedList" title="Bullet list">&#8226;</button>
+              <button type="button" class="tb-btn" data-cmd="insertOrderedList" title="Numbered list">1.</button>
+              <span class="tb-sep"></span>
+              <select id="tb-placeholder" class="tb-select" title="Insert placeholder">
+                <option value="">+ Variable</option>
+                <option value="trackingCode">trackingCode — unique per request</option>
+                <option value="files">files — requested file names</option>
+              </select>
+              <span class="tb-sep"></span>
+              <button type="button" id="body-toggle-source" class="tb-btn tb-btn-text" title="Toggle HTML source">Source</button>
+            </div>
+          </div>
+          <div id="body-editor" class="body-editor" contenteditable="true"></div>
+          <textarea id="email-delivery-body" class="body-source" style="display:none" rows="10"></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Email</button>
+        <span id="email-status" class="save-status"></span>
+      </form>
+    </div>
+
+    <!-- Turnstile -->
+    <div class="admin-card">
+      <h2>Turnstile (Human Verification)</h2>
+      <form id="turnstile-form">
+        <div class="form-group">
+          <label for="ts-site-key">Site Key</label>
+          <input type="text" id="ts-site-key" placeholder="0x..." />
+        </div>
+        <div class="form-group">
+          <label for="ts-secret-key">Secret Key</label>
+          <input type="text" id="ts-secret-key" placeholder="0x..." />
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="ts-enabled" /> Enabled
+          </label>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Turnstile</button>
+        <span id="ts-status" class="save-status"></span>
+      </form>
+    </div>
+
+  </div>
+</AdminLayout>
+
+<script>
+  // Load current settings
+  async function loadSettings() {
+    try {
+      const res = await fetch('/api/admin/settings', { credentials: 'include' });
+      const data = await res.json();
+      if (!data.ok) return;
+
+      const { telegram, email, turnstile } = data.data;
+
+      if (telegram) {
+        (document.getElementById('tg-bot-token') as HTMLInputElement).value = telegram.botToken || '';
+        (document.getElementById('tg-chat-id') as HTMLInputElement).value = telegram.chatId || '';
+        (document.getElementById('tg-enabled') as HTMLInputElement).checked = telegram.enabled || false;
+      }
+
+      if (email) {
+        (document.getElementById('email-api-key') as HTMLInputElement).value = email.resendApiKey || '';
+        (document.getElementById('email-from') as HTMLInputElement).value = email.fromAddress || '';
+        (document.getElementById('email-from-name') as HTMLInputElement).value = email.fromName || '';
+        (document.getElementById('email-whitelist') as HTMLTextAreaElement).value = (email.whitelist || []).join('\n');
+        const siteDomain = window.location.hostname;
+        const defaultSubject = 'Document Request — {{trackingCode}}';
+        const defaultBody = `<p>Hello,</p>
+<p>Someone has requested the following document(s) from <strong>${siteDomain}</strong>:</p>
+<ul>{{files}}</ul>
+<p>They are attached to this email for your reference.</p>
+<p style="margin-top:1em;font-size:0.9em;color:#666;">Tracking reference: <strong>{{trackingCode}}</strong><br/>
+If you did not expect this email, you may safely ignore it.</p>
+<p>Best regards</p>`;
+        (document.getElementById('email-delivery-subject') as HTMLInputElement).value = email.deliverySubject || defaultSubject;
+        const rawBody = email.deliveryBody || defaultBody;
+        (document.getElementById('email-delivery-body') as HTMLTextAreaElement).value = rawBody;
+        const editor = document.getElementById('body-editor') as HTMLDivElement;
+        if (editor) editor.innerHTML = htmlToEditor(rawBody);
+      }
+
+      if (turnstile) {
+        (document.getElementById('ts-site-key') as HTMLInputElement).value = turnstile.siteKey || '';
+        (document.getElementById('ts-secret-key') as HTMLInputElement).value = turnstile.secretKey || '';
+        (document.getElementById('ts-enabled') as HTMLInputElement).checked = turnstile.enabled || false;
+      }
+
+    } catch (err) {
+      console.error('Failed to load settings:', err);
+    }
+  }
+
+  // Rich text email editor
+  const bodyEditor = document.getElementById('body-editor') as HTMLDivElement;
+  const bodySource = document.getElementById('email-delivery-body') as HTMLTextAreaElement;
+  const toggleSourceBtn = document.getElementById('body-toggle-source')!;
+  let sourceMode = false;
+
+  const tooltips: Record<string, string> = {
+    trackingCode: 'Unique code per request, e.g. REQ-A3F7K2',
+    files: 'Requested file names, e.g. certificate.pdf, transcript.pdf',
+  };
+
+  // Placeholder badge HTML (contenteditable=false so cursor skips over them)
+  function placeholderBadge(name: string) {
+    const tip = tooltips[name] || name;
+    return `<span class="tpl-badge" contenteditable="false" data-placeholder="${name}" title="${tip}">\u200B{{${name}}}\u200B</span>`;
+  }
+
+  // Convert raw HTML (with {{...}}) to editor HTML (with badges)
+  // {{domain}} gets replaced with the real domain — it's static
+  function htmlToEditor(html: string): string {
+    return html
+      .replace(/\{\{domain\}\}/g, window.location.hostname)
+      .replace(/\{\{(trackingCode|files)\}\}/g, (_, name) => placeholderBadge(name));
+  }
+
+  // Convert editor HTML (with badges) back to raw HTML (with {{...}})
+  function editorToHtml(html: string): string {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    tmp.querySelectorAll('.tpl-badge').forEach(el => {
+      const name = el.getAttribute('data-placeholder') || el.textContent?.replace(/[{}]/g, '').trim();
+      el.replaceWith(`{{${name}}}`);
+    });
+    return tmp.innerHTML;
+  }
+
+  // Sync editor → hidden textarea (for form submission)
+  function syncToSource() {
+    if (bodySource && bodyEditor) {
+      bodySource.value = editorToHtml(bodyEditor.innerHTML);
+    }
+  }
+
+  bodyEditor?.addEventListener('input', syncToSource);
+
+  // Toolbar commands
+  document.querySelectorAll('.tb-btn[data-cmd]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const cmd = (btn as HTMLElement).dataset.cmd!;
+      document.execCommand(cmd, false);
+      bodyEditor?.focus();
+    });
+  });
+
+  // Insert placeholder variable
+  document.getElementById('tb-placeholder')?.addEventListener('change', (e) => {
+    const sel = e.target as HTMLSelectElement;
+    const name = sel.value;
+    if (!name) return;
+    document.execCommand('insertHTML', false, placeholderBadge(name));
+    sel.value = '';
+    bodyEditor?.focus();
+    syncToSource();
+  });
+
+  // Toggle source mode
+  toggleSourceBtn?.addEventListener('click', () => {
+    sourceMode = !sourceMode;
+    if (sourceMode) {
+      // Switch to source: sync editor → textarea, show textarea
+      syncToSource();
+      bodyEditor.style.display = 'none';
+      bodySource.style.display = '';
+      bodySource.focus();
+      toggleSourceBtn.textContent = 'Visual';
+    } else {
+      // Switch to visual: load textarea → editor
+      bodyEditor.innerHTML = htmlToEditor(bodySource.value);
+      bodyEditor.style.display = '';
+      bodySource.style.display = 'none';
+      bodyEditor.focus();
+      toggleSourceBtn.textContent = 'Source';
+    }
+  });
+
+  async function saveSection(section: string, data: any, statusId: string) {
+    const statusEl = document.getElementById(statusId)!;
+    statusEl.textContent = 'Saving...';
+    statusEl.style.color = '';
+
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ section, data }),
+      });
+      if (res.ok) {
+        statusEl.textContent = 'Saved!';
+        statusEl.style.color = 'var(--admin-success)';
+      } else {
+        statusEl.textContent = 'Failed';
+        statusEl.style.color = 'var(--admin-danger)';
+      }
+    } catch {
+      statusEl.textContent = 'Error';
+      statusEl.style.color = 'var(--admin-danger)';
+    }
+
+    setTimeout(() => { statusEl.textContent = ''; }, 3000);
+  }
+
+  document.getElementById('telegram-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    saveSection('telegram', {
+      botToken: (document.getElementById('tg-bot-token') as HTMLInputElement).value,
+      chatId: (document.getElementById('tg-chat-id') as HTMLInputElement).value,
+      enabled: (document.getElementById('tg-enabled') as HTMLInputElement).checked,
+    }, 'tg-status');
+  });
+
+  document.getElementById('email-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const deliverySubject = (document.getElementById('email-delivery-subject') as HTMLInputElement).value.trim();
+    const deliveryBody = (document.getElementById('email-delivery-body') as HTMLTextAreaElement).value.trim();
+    saveSection('email', {
+      resendApiKey: (document.getElementById('email-api-key') as HTMLInputElement).value,
+      fromAddress: (document.getElementById('email-from') as HTMLInputElement).value,
+      fromName: (document.getElementById('email-from-name') as HTMLInputElement).value,
+      whitelist: (document.getElementById('email-whitelist') as HTMLTextAreaElement).value
+        .split('\n').map((s: string) => s.trim()).filter(Boolean),
+      ...(deliverySubject && { deliverySubject }),
+      ...(deliveryBody && { deliveryBody }),
+    }, 'email-status');
+  });
+
+  document.getElementById('turnstile-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    saveSection('turnstile', {
+      siteKey: (document.getElementById('ts-site-key') as HTMLInputElement).value,
+      secretKey: (document.getElementById('ts-secret-key') as HTMLInputElement).value,
+      enabled: (document.getElementById('ts-enabled') as HTMLInputElement).checked,
+    }, 'ts-status');
+  });
+
+  loadSettings();
+</script>
+
+<style>
+  .save-status {
+    margin-left: 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .body-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+  }
+
+  .body-label-row label {
+    margin-bottom: 0;
+  }
+
+  .body-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .tb-btn {
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--admin-border, #e5e7eb);
+    border-radius: 4px;
+    background: white;
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1;
+    color: #374151;
+    transition: background 0.1s;
+  }
+
+  .tb-btn:hover {
+    background: #f3f4f6;
+  }
+
+  .tb-btn-text {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--admin-primary, #2563eb);
+    border-color: var(--admin-primary, #2563eb);
+  }
+
+  .tb-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--admin-border, #e5e7eb);
+    margin: 0 4px;
+  }
+
+  .tb-select {
+    font-size: 0.78rem;
+    padding: 0.2rem 0.3rem;
+    border: 1px solid var(--admin-border, #e5e7eb);
+    border-radius: 4px;
+    background: white;
+    color: var(--admin-primary, #2563eb);
+    cursor: pointer;
+  }
+
+  .body-editor {
+    border: 1px solid var(--admin-border, #e5e7eb);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    min-height: 160px;
+    background: white;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: #1f2937;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .body-editor:focus {
+    border-color: var(--admin-primary, #2563eb);
+  }
+
+  .body-editor p {
+    margin: 0.4em 0;
+  }
+
+  .body-editor ul, .body-editor ol {
+    margin: 0.4em 0;
+    padding-left: 1.5em;
+  }
+
+  .body-source {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  :global(.tpl-badge) {
+    display: inline-block;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: var(--font-mono, monospace);
+    padding: 0.1rem 0.45rem;
+    border-radius: 4px;
+    border: 1px solid #93c5fd;
+    vertical-align: baseline;
+    cursor: default;
+    user-select: none;
+  }
+</style>
