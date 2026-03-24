@@ -71,6 +71,7 @@ if (!isAuthed) return Astro.redirect('/admin/login');
               <div class="form-group"><label>Summary</label><textarea id="cv-summary" rows="3" placeholder="Brief introduction..."></textarea></div>
               <div class="form-group"><label>Avatar URL</label><input type="text" id="cv-avatar" placeholder="https://..." /></div>
               <div class="form-group"><label>Links (one per line: label|url)</label><textarea id="cv-links" rows="3" placeholder="GitHub|https://github.com/you"></textarea></div>
+              <div class="form-group"><label>Footer Links <small style="font-weight:400;color:var(--admin-text-secondary)">(one per line: label|url — shown in site footer)</small></label><textarea id="cv-footer-links" rows="3" placeholder="Email|mailto:you@example.com&#10;Phone|tel:+86xxxxxxxxxx"></textarea></div>
               <div class="form-group"><label>Page Title</label><input type="text" id="cv-meta-title" placeholder="My CV" /></div>
               <div class="form-group"><label>Language</label><select id="cv-meta-lang"><option value="en">English (en)</option></select></div>
             </div>
@@ -362,6 +363,8 @@ if (!isAuthed) return Astro.redirect('/admin/login');
     (document.getElementById('cv-avatar') as HTMLInputElement).value = cvData.header?.avatar || '';
     (document.getElementById('cv-links') as HTMLTextAreaElement).value =
       (cvData.header?.links || []).map((l: any) => `${l.label}|${l.url}`).join('\n');
+    (document.getElementById('cv-footer-links') as HTMLTextAreaElement).value =
+      (cvData.footerLinks || []).map((l: any) => `${l.label}|${l.url}`).join('\n');
     (document.getElementById('cv-meta-title') as HTMLInputElement).value = cvData.meta?.title || 'My CV';
     (document.getElementById('cv-meta-lang') as HTMLSelectElement).value = cvData.meta?.lang || 'en';
 
@@ -384,6 +387,12 @@ if (!isAuthed) return Astro.redirect('/admin/login');
           ? `<div class="form-group"><label>${f}</label><textarea class="item-field" data-field="${f}" rows="3" placeholder="One per line">${(item[f] || []).join('\n')}</textarea></div>`
           : `<div class="form-group"><label>${f}</label><input type="text" class="item-field" data-field="${f}" value="${esc(String(item[f] || ''))}" /></div>`
         ).join('')}
+        <div class="form-group checkbox-group">
+          <label class="checkbox-label-inline">
+            <input type="checkbox" class="item-show-request" ${item.showRequestLink ? 'checked' : ''} />
+            Show "Request Document" link
+          </label>
+        </div>
       </div>
     `).join('');
   }
@@ -414,6 +423,12 @@ if (!isAuthed) return Astro.redirect('/admin/login');
         <div class="form-group"><label>Description</label><textarea class="project-desc" rows="2">${p.description || ''}</textarea></div>
         <div class="form-group"><label>URL</label><input type="text" class="project-url" value="${esc(p.url || '')}" /></div>
         <div class="form-group"><label>Highlights (one per line)</label><textarea class="project-highlights" rows="2">${(p.highlights || []).join('\n')}</textarea></div>
+        <div class="form-group checkbox-group">
+          <label class="checkbox-label-inline">
+            <input type="checkbox" class="project-show-request" ${p.showRequestLink ? 'checked' : ''} />
+            Show "Request Document" link
+          </label>
+        </div>
       </div>
     `).join('');
   }
@@ -434,6 +449,13 @@ if (!isAuthed) return Astro.redirect('/admin/login');
           return { label: label.trim(), url: rest.join('|').trim() };
         }),
     };
+    const footerLinksRaw = (document.getElementById('cv-footer-links') as HTMLTextAreaElement).value;
+    cvData.footerLinks = footerLinksRaw.split('\n').filter(Boolean).map((line: string) => {
+      const [label, ...rest] = line.split('|');
+      return { label: label.trim(), url: rest.join('|').trim() };
+    });
+    if (cvData.footerLinks.length === 0) delete cvData.footerLinks;
+
     cvData.experience = collectListItems('experience', ['company', 'role', 'location', 'startDate', 'endDate', 'highlights']);
     cvData.education = collectListItems('education', ['institution', 'degree', 'field', 'startDate', 'endDate', 'highlights']);
 
@@ -444,12 +466,17 @@ if (!isAuthed) return Astro.redirect('/admin/login');
     }));
 
     const projectItems = document.querySelectorAll('#project-items .editor-item');
-    cvData.projects = Array.from(projectItems).map(item => ({
-      name: (item.querySelector('.project-name') as HTMLInputElement).value,
-      description: (item.querySelector('.project-desc') as HTMLTextAreaElement).value,
-      url: (item.querySelector('.project-url') as HTMLInputElement).value || undefined,
-      highlights: (item.querySelector('.project-highlights') as HTMLTextAreaElement).value.split('\n').filter(Boolean),
-    }));
+    cvData.projects = Array.from(projectItems).map(item => {
+      const obj: any = {
+        name: (item.querySelector('.project-name') as HTMLInputElement).value,
+        description: (item.querySelector('.project-desc') as HTMLTextAreaElement).value,
+        url: (item.querySelector('.project-url') as HTMLInputElement).value || undefined,
+        highlights: (item.querySelector('.project-highlights') as HTMLTextAreaElement).value.split('\n').filter(Boolean),
+      };
+      const checkEl = item.querySelector('.project-show-request') as HTMLInputElement | null;
+      if (checkEl?.checked) obj.showRequestLink = true;
+      return obj;
+    });
   }
 
   function collectListItems(name: string, fields: string[]) {
@@ -461,6 +488,8 @@ if (!isAuthed) return Astro.redirect('/admin/login');
         if (!el) return;
         obj[f] = f === 'highlights' ? el.value.split('\n').filter(Boolean) : (el.value || undefined);
       });
+      const checkEl = item.querySelector('.item-show-request') as HTMLInputElement | null;
+      if (checkEl?.checked) obj.showRequestLink = true;
       return obj;
     });
   }
@@ -811,4 +840,24 @@ if (!isAuthed) return Astro.redirect('/admin/login');
 
   .status-msg.success { color: var(--admin-success); }
   .status-msg.error { color: var(--admin-danger); }
+
+  .checkbox-group {
+    margin-bottom: 0;
+  }
+
+  .checkbox-label-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    color: var(--admin-text-secondary);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .checkbox-label-inline input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+    cursor: pointer;
+  }
 </style>

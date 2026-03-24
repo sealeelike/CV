@@ -22,9 +22,9 @@ if (!isAuthed) return Astro.redirect('/admin/login');
       <form id="create-form" class="create-form">
         <div class="create-grid">
           <div class="form-group">
-            <label for="ml-token">Custom Token <small>(optional — leave blank for random)</small></label>
-            <input type="text" id="ml-token" placeholder="e.g. google-hr-2026" pattern="[a-zA-Z0-9_-]{4,128}" />
-            <small>4-128 chars: letters, numbers, hyphens, underscores</small>
+            <label for="ml-token">Custom Token <small>(leave blank = public access; fill in = private link)</small></label>
+            <input type="text" id="ml-token" placeholder="e.g. google-hr-2026 (blank = open to all)" />
+            <small>Blank opens the site publicly. Private: 4-128 chars, letters/numbers/hyphens/underscores.</small>
           </div>
           <div class="form-group">
             <label for="ml-label">Label / Notes</label>
@@ -231,7 +231,7 @@ if (!isAuthed) return Astro.redirect('/admin/login');
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...(customToken && { customToken }),
+          customToken,
           ...(label && { label }),
           ...(assetId && { assetId }),
           ...(expiresRaw && { expiresAt: new Date(expiresRaw).toISOString() }),

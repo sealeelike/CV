@@ -101,6 +101,7 @@ export interface CVData {
     startDate: string;
     endDate?: string;
     highlights: string[];
+    showRequestLink?: boolean;
   }[];
   education: {
     institution: string;
@@ -109,6 +110,7 @@ export interface CVData {
     startDate: string;
     endDate?: string;
     highlights?: string[];
+    showRequestLink?: boolean;
   }[];
   skills: {
     category: string;
@@ -119,18 +121,21 @@ export interface CVData {
     description: string;
     url?: string;
     highlights?: string[];
+    showRequestLink?: boolean;
   }[];
   awards?: {
     title: string;
     awarder: string;
     date?: string;
     description?: string;
+    showRequestLink?: boolean;
   }[];
   custom?: {
     id: string;
     title: string;
     content: string; // HTML or markdown
   }[];
+  footerLinks?: { label: string; url: string }[];
 }
 
 // ============================================
@@ -146,8 +151,14 @@ export interface ThemeFieldDef {
 export interface ThemeStrings {
   navLinks?: Array<{ label: string; href: string; active?: boolean }>;
   navDownload?: string;
-  footerBrand?: string;
   footerCopy?: string;
+  contactTitle?: string;
+  sectionExperience?: string;
+  sectionEducation?: string;
+  sectionSkills?: string;
+  sectionProjects?: string;
+  sectionAwards?: string;
+  requestDocument?: string;
 }
 
 export interface ThemeLanguage {

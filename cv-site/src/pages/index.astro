@@ -28,8 +28,11 @@ const magicLinkId: string | null = magicMatch ? magicMatch[1] : null;
 // Check if viewer is admin (bypass access control)
 const isAdmin = await requireAdmin(Astro.request, kv);
 
-// Access control: require magic link or admin session
-const hasAccess = !!magicLinkId || isAdmin;
+// Check for public access link (token = '' means site is open to everyone)
+const publicLink = await db.prepare('SELECT 1 FROM magic_links WHERE token = ? LIMIT 1').bind('').first();
+
+// Access control: public link, valid magic link cookie, or admin session
+const hasAccess = !!publicLink || !!magicLinkId || isAdmin;
 
 // Only load CV data if access is granted
 let cvData: CVData | null = null;
@@ -46,7 +49,6 @@ const DEFAULT_NAV_LINKS = [
   { label: 'Contact', href: '#contact' },
 ];
 const DEFAULT_NAV_DOWNLOAD = 'Download CV';
-const DEFAULT_FOOTER_BRAND = 'THE CURATED MANUSCRIPT';
 
 if (hasAccess) {
   // Try auto-migration from KV → assets table (one-time, no-op if assets exist)
@@ -140,8 +142,14 @@ const langConfig = theme?.config.languages?.[lang];
 const resolvedFonts = langConfig?.fonts ?? theme?.config.fonts;
 const navLinks = langConfig?.strings?.navLinks ?? theme?.config.strings?.navLinks ?? DEFAULT_NAV_LINKS;
 const navDownload = langConfig?.strings?.navDownload ?? theme?.config.strings?.navDownload ?? DEFAULT_NAV_DOWNLOAD;
-const footerBrand = langConfig?.strings?.footerBrand ?? theme?.config.strings?.footerBrand ?? DEFAULT_FOOTER_BRAND;
 const footerCopy = langConfig?.strings?.footerCopy ?? theme?.config.strings?.footerCopy ?? 'ALL RIGHTS RESERVED.';
+const contactTitle = langConfig?.strings?.contactTitle ?? theme?.config.strings?.contactTitle ?? 'Contact';
+const sectionExperience = langConfig?.strings?.sectionExperience ?? theme?.config.strings?.sectionExperience ?? 'Experience';
+const sectionEducation = langConfig?.strings?.sectionEducation ?? theme?.config.strings?.sectionEducation ?? 'Education';
+const sectionSkills = langConfig?.strings?.sectionSkills ?? theme?.config.strings?.sectionSkills ?? 'Skills';
+const sectionProjects = langConfig?.strings?.sectionProjects ?? theme?.config.strings?.sectionProjects ?? 'Projects';
+const sectionAwards = langConfig?.strings?.sectionAwards ?? theme?.config.strings?.sectionAwards ?? 'Honors & Awards';
+const requestDocument = langConfig?.strings?.requestDocument ?? theme?.config.strings?.requestDocument ?? 'Request Document';
 const activeVariant = variants.find(v => v.asset_id === currentVariantId) ?? variants[0];
 ---
 
@@ -211,37 +219,40 @@ const activeVariant = variants.find(v => v.asset_id === currentVariantId) ?? var
         return (
           <div class="cv-sidebar">
             {group.sections.map((section) => {
-              if (section === 'education' && cv.education.length > 0) return <Education items={cv.education} />;
-              if (section === 'skills' && cv.skills.length > 0) return <Skills items={cv.skills} />;
+              if (section === 'education' && cv.education.length > 0) return <Education items={cv.education} sectionTitle={sectionEducation} requestDocument={requestDocument} />;
+              if (section === 'skills' && cv.skills.length > 0) return <Skills items={cv.skills} sectionTitle={sectionSkills} />;
               return null;
             })}
           </div>
         );
       }
       const section = group.name;
-      if (section === 'experience' && cv.experience.length > 0) return <Experience items={cv.experience} />;
-      if (section === 'education' && cv.education.length > 0) return <Education items={cv.education} />;
-      if (section === 'skills' && cv.skills.length > 0) return <Skills items={cv.skills} />;
-      if (section === 'projects' && cv.projects && cv.projects.length > 0) return <Projects items={cv.projects} />;
-      if (section === 'awards' && cv.awards && cv.awards.length > 0) return <Awards items={cv.awards} />;
+      if (section === 'experience' && cv.experience.length > 0) return <Experience items={cv.experience} sectionTitle={sectionExperience} requestDocument={requestDocument} />;
+      if (section === 'education' && cv.education.length > 0) return <Education items={cv.education} sectionTitle={sectionEducation} requestDocument={requestDocument} />;
+      if (section === 'skills' && cv.skills.length > 0) return <Skills items={cv.skills} sectionTitle={sectionSkills} />;
+      if (section === 'projects' && cv.projects && cv.projects.length > 0) return <Projects items={cv.projects} sectionTitle={sectionProjects} requestDocument={requestDocument} />;
+      if (section === 'awards' && cv.awards && cv.awards.length > 0) return <Awards items={cv.awards} sectionTitle={sectionAwards} requestDocument={requestDocument} />;
       return null;
     })}
 
     <ContactForm
       turnstileEnabled={turnstileConfig?.enabled ?? false}
       turnstileSiteKey={turnstileConfig?.siteKey ?? ''}
+      title={contactTitle}
     />
   </main>
 
   <footer class="site-footer">
     <div class="site-footer-inner">
-      <div class="site-footer-brand">{footerBrand}</div>
-      <div class="site-footer-copy">&copy; {new Date().getFullYear()} {footerBrand}. {footerCopy}</div>
-      <div class="site-footer-links">
-        {cv.header.links.filter(l => l.url.startsWith('http')).slice(0, 3).map(link => (
-          <a href={link.url} target="_blank" rel="noopener noreferrer">{link.label}</a>
-        ))}
-      </div>
+      <div class="site-footer-brand">{cv.header.name}</div>
+      <div class="site-footer-copy">&copy; {new Date().getFullYear()} {cv.header.name}. {footerCopy}</div>
+      {cv.footerLinks && cv.footerLinks.length > 0 && (
+        <div class="site-footer-links">
+          {cv.footerLinks.map(link => (
+            <a href={link.url}>{link.label}</a>
+          ))}
+        </div>
+      )}
     </div>
   </footer>
 </BaseLayout>

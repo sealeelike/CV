@@ -50,8 +50,14 @@
           { "label": "Contact", "href": "#contact" }
         ],
         "navDownload": "Download CV",
-        "footerBrand": "THE CURATED MANUSCRIPT",
-        "footerCopy": "ALL RIGHTS RESERVED."
+        "footerCopy": "ALL RIGHTS RESERVED.",
+        "contactTitle": "Leave a Direct Message",
+        "sectionExperience": "Experience",
+        "sectionEducation": "Education",
+        "sectionSkills": "Skills",
+        "sectionProjects": "Projects",
+        "sectionAwards": "Honors & Awards",
+        "requestDocument": "Request Document"
       }
     },
     "zh": {
@@ -65,8 +71,14 @@
           { "label": "联系方式", "href": "#contact" }
         ],
         "navDownload": "下载简历",
-        "footerBrand": "THE CURATED MANUSCRIPT",
-        "footerCopy": "版权所有."
+        "footerCopy": "版权所有.",
+        "contactTitle": "给我留言",
+        "sectionExperience": "工作经历",
+        "sectionEducation": "教育背景",
+        "sectionSkills": "技能",
+        "sectionProjects": "项目经历",
+        "sectionAwards": "荣誉与奖项",
+        "requestDocument": "申请证明材料"
       }
     }
   }

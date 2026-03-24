@@ -2,13 +2,14 @@
 interface Props {
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string;
+  title?: string;
 }
 
-const { turnstileEnabled = false, turnstileSiteKey = '' } = Astro.props;
+const { turnstileEnabled = false, turnstileSiteKey = '', title = 'Contact' } = Astro.props;
 ---
 
 <section class="cv-section contact-form" id="contact">
-  <h2 class="cv-section-title">Contact</h2>
+  <h2 class="cv-section-title">{title}</h2>
   <form id="contact-form">
     <div class="form-row">
       <div class="form-field">

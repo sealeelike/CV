@@ -40,11 +40,11 @@ export const POST: APIRoute = async ({ request }) => {
     variantAssets?: { asset_id: string; label: string }[];
   };
 
-  // Use custom token or generate random one
-  const token = body.customToken?.trim() || generateToken();
+  // Use custom token (empty string = public access link) or generate random one
+  const token = body.customToken !== undefined ? body.customToken.trim() : generateToken();
 
-  // Validate custom token (alphanumeric + hyphens, 4-128 chars)
-  if (body.customToken) {
+  // Validate non-empty custom tokens (alphanumeric + hyphens, 4-128 chars)
+  if (body.customToken !== undefined && body.customToken.trim() !== '') {
     if (!/^[a-zA-Z0-9_-]{4,128}$/.test(token)) {
       return Response.json(
         { ok: false, error: 'Custom token must be 4-128 characters (letters, numbers, hyphens, underscores)' } satisfies ApiResponse,

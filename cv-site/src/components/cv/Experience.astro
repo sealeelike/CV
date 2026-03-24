@@ -10,22 +10,24 @@ interface ExperienceItem {
 
 interface Props {
   items: ExperienceItem[];
+  sectionTitle?: string;
+  requestDocument?: string;
 }
 
-const { items } = Astro.props;
+const { items, sectionTitle = 'Experience', requestDocument = 'Request Document' } = Astro.props;
 ---
 
 <section class="cv-section cv-experience">
-  <h2 class="cv-section-title">Experience</h2>
+  <h2 class="cv-section-title">{sectionTitle}</h2>
   {items.map((item) => (
     <div class="cv-item">
       <div class="cv-item-header">
         <div>
           <span class="cv-item-title">{item.role}</span>
-          <span class="cv-item-subtitle"> at {item.company}</span>
+          <span class="cv-item-subtitle">{item.company}</span>
         </div>
         <span class="cv-item-date">
-          {item.startDate} — {item.endDate ?? 'Present'}
+          {item.endDate ? `${item.startDate} — ${item.endDate}` : item.startDate}
         </span>
       </div>
       {item.location && <div class="cv-item-location">{item.location}</div>}
@@ -36,9 +38,11 @@ const { items } = Astro.props;
           ))}
         </ul>
       )}
-      <div class="cv-item-actions">
-        <a href="/request">Request Document <span class="arrow">&nearr;</span></a>
-      </div>
+      {item.showRequestLink && (
+        <div class="cv-item-actions">
+          <a href="/request">{requestDocument} <span class="arrow">&nearr;</span></a>
+        </div>
+      )}
     </div>
   ))}
 </section>

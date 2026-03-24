@@ -6,13 +6,14 @@ interface SkillCategory {
 
 interface Props {
   items: SkillCategory[];
+  sectionTitle?: string;
 }
 
-const { items } = Astro.props;
+const { items, sectionTitle = 'Skills' } = Astro.props;
 ---
 
 <section class="cv-section cv-skills">
-  <h2 class="cv-section-title">Skills</h2>
+  <h2 class="cv-section-title">{sectionTitle}</h2>
   <div class="cv-skills-grid">
     {items.map((cat) => (
       <div class="cv-skill-category">
