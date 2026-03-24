@@ -61,6 +61,7 @@ if (!isAuthed) return Astro.redirect('/admin/login');
               <button class="tab" data-section="education">Education</button>
               <button class="tab" data-section="skills">Skills</button>
               <button class="tab" data-section="projects">Projects</button>
+              <button class="tab" data-section="awards">Awards</button>
               <button class="tab" data-section="json">Raw JSON</button>
             </div>
 
@@ -98,6 +99,12 @@ if (!isAuthed) return Astro.redirect('/admin/login');
             <div class="section-panel hidden" id="panel-projects">
               <div id="project-items"></div>
               <button class="btn btn-secondary" id="add-project">+ Add Project</button>
+            </div>
+
+            <!-- Awards section -->
+            <div class="section-panel hidden" id="panel-awards">
+              <div id="award-items"></div>
+              <button class="btn btn-secondary" id="add-award">+ Add Award</button>
             </div>
 
             <!-- Raw JSON -->
@@ -372,6 +379,7 @@ if (!isAuthed) return Astro.redirect('/admin/login');
     renderListSection('education', cvData.education || [], ['institution', 'degree', 'field', 'startDate', 'endDate', 'highlights']);
     renderSkills(cvData.skills || []);
     renderProjects(cvData.projects || []);
+    renderAwards(cvData.awards || []);
     (document.getElementById('cv-json') as HTMLTextAreaElement).value = JSON.stringify(cvData, null, 2);
   }
 
@@ -433,6 +441,28 @@ if (!isAuthed) return Astro.redirect('/admin/login');
     `).join('');
   }
 
+  function renderAwards(awards: any[]) {
+    const container = document.getElementById('award-items')!;
+    container.innerHTML = awards.map((a: any, i: number) => `
+      <div class="editor-item" data-index="${i}">
+        <div class="item-header">
+          <strong>#${i + 1}</strong>
+          <button class="btn btn-danger btn-sm" onclick="removeItem('awards', ${i})">Remove</button>
+        </div>
+        <div class="form-group"><label>Title</label><input type="text" class="award-title" value="${esc(a.title || '')}" /></div>
+        <div class="form-group"><label>Awarder</label><input type="text" class="award-awarder" value="${esc(a.awarder || '')}" /></div>
+        <div class="form-group"><label>Date</label><input type="text" class="award-date" value="${esc(a.date || '')}" /></div>
+        <div class="form-group"><label>Description</label><textarea class="award-description" rows="2">${a.description || ''}</textarea></div>
+        <div class="form-group checkbox-group">
+          <label class="checkbox-label-inline">
+            <input type="checkbox" class="award-show-request" ${a.showRequestLink ? 'checked' : ''} />
+            Show "Request Document" link
+          </label>
+        </div>
+      </div>
+    `).join('');
+  }
+
   function collectFormData() {
     cvData.meta = {
       title: (document.getElementById('cv-meta-title') as HTMLInputElement).value || 'My CV',
@@ -477,6 +507,20 @@ if (!isAuthed) return Astro.redirect('/admin/login');
       if (checkEl?.checked) obj.showRequestLink = true;
       return obj;
     });
+
+    const awardItems = document.querySelectorAll('#award-items .editor-item');
+    cvData.awards = Array.from(awardItems).map(item => {
+      const obj: any = {
+        title: (item.querySelector('.award-title') as HTMLInputElement).value,
+        awarder: (item.querySelector('.award-awarder') as HTMLInputElement).value,
+        date: (item.querySelector('.award-date') as HTMLInputElement).value || undefined,
+        description: (item.querySelector('.award-description') as HTMLTextAreaElement).value || undefined,
+      };
+      const checkEl = item.querySelector('.award-show-request') as HTMLInputElement | null;
+      if (checkEl?.checked) obj.showRequestLink = true;
+      return obj;
+    });
+    if (cvData.awards.length === 0) delete cvData.awards;
   }
 
   function collectListItems(name: string, fields: string[]) {
@@ -542,6 +586,12 @@ if (!isAuthed) return Astro.redirect('/admin/login');
     collectFormData();
     cvData.projects = cvData.projects || [];
     cvData.projects.push({ name: '', description: '' });
+    renderForm();
+  });
+  document.getElementById('add-award')?.addEventListener('click', () => {
+    collectFormData();
+    cvData.awards = cvData.awards || [];
+    cvData.awards.push({ title: '', awarder: '' });
     renderForm();
   });
 
