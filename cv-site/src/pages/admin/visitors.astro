@@ -2,7 +2,7 @@
 import { env } from 'cloudflare:workers';
 import AdminLayout from '../../layouts/AdminLayout.astro';
 import { requireAdmin } from '../../lib/auth.ts';
-import { getGuests, getGuestCount, getGuestsByFingerprint, getGuestCountByFingerprint } from '../../lib/db.ts';
+import { getGuests, getGuestCount, getGuestsByFingerprint, getGuestCountByFingerprint, getLinkAccesses, getLinkAccessCount } from '../../lib/db.ts';
 
 const kv = env.KV as KVNamespace;
 const db = env.DB as D1Database;
@@ -17,12 +17,22 @@ const highlightId = url.searchParams.get('highlight') ?? '';
 const limit = 20;
 const offset = (page - 1) * limit;
 
-const [guests, total] = await Promise.all([
+const [guests, total, accesses, accessTotal] = await Promise.all([
   fpFilter ? getGuestsByFingerprint(db, fpFilter, limit, offset) : getGuests(db, limit, offset),
   fpFilter ? getGuestCountByFingerprint(db, fpFilter) : getGuestCount(db),
+  fpFilter ? Promise.resolve([]) : getLinkAccesses(db, limit, offset),
+  fpFilter ? Promise.resolve(0) : getLinkAccessCount(db),
 ]);
 
 const totalPages = Math.ceil(total / limit);
+const accessTotalPages = Math.ceil(accessTotal / limit);
+
+// Pre-compute display values for access log rows
+const accessRows = accesses.map((a) => ({
+  ...a,
+  linkLabel: a.magic_link_label || (a.magic_link_token ? a.magic_link_token.slice(0, 14) : null),
+  uaShort: a.user_agent ? (a.user_agent.length > 60 ? a.user_agent.slice(0, 60) + '\u2026' : a.user_agent) : '-',
+}));
 
 // When filtering by fingerprint, gather summary info
 const fpFirstSeen = fpFilter && guests.length > 0 ? guests[guests.length - 1].consent_time : null;
@@ -55,11 +65,11 @@ const fpRaw = fpFilter && guests.length > 0 && guests[0].fingerprint_raw
           </div>
           <div class="fp-field">
             <span class="fp-label">First Seen</span>
-            <span>{fpFirstSeen ? new Date(fpFirstSeen).toLocaleString() : '-'}</span>
+            <span>{fpFirstSeen ? new Date(fpFirstSeen).toLocaleString('en-US', { timeZone: 'UTC' }) + ' UTC' : '-'}</span>
           </div>
           <div class="fp-field">
             <span class="fp-label">Last Seen</span>
-            <span>{fpLastSeen ? new Date(fpLastSeen).toLocaleString() : '-'}</span>
+            <span>{fpLastSeen ? new Date(fpLastSeen).toLocaleString('en-US', { timeZone: 'UTC' }) + ' UTC' : '-'}</span>
           </div>
           <div class="fp-field">
             <span class="fp-label">Known IPs</span>
@@ -135,7 +145,7 @@ const fpRaw = fpFilter && guests.length > 0 && guests[0].fingerprint_raw
                 </a>
               ) : '-'}
             </td>
-            <td>{new Date(g.consent_time).toLocaleString()}</td>
+            <td>{new Date(g.consent_time).toLocaleString('en-US', { timeZone: 'UTC' }) + ' UTC'}</td>
           </tr>
         ))}
         {guests.length === 0 && (
@@ -152,6 +162,53 @@ const fpRaw = fpFilter && guests.length > 0 && guests[0].fingerprint_raw
       </div>
     )}
   </div>
+
+  {!fpFilter && (
+    <div class="admin-card" style="margin-top:1.5rem">
+      <h2>Access Log ({accessTotal} total)</h2>
+      <p class="access-log-note">Server-side log from <code>/api/verify-magic</code>. Records every token use including bots and AI agents — regardless of whether consent was given.</p>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>IP</th>
+            <th>Country</th>
+            <th>Magic Link</th>
+            <th>User-Agent</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {accessRows.map((a) => (
+            <tr>
+              <td>{a.access_id}</td>
+              <td><code>{a.ip ?? '-'}</code></td>
+              <td>{a.geo_country ?? '-'}</td>
+              <td>
+                {a.linkLabel ? (
+                  <a href="/admin/access" title={a.magic_link_token ?? a.linkLabel}>
+                    <code>{a.linkLabel}</code>
+                  </a>
+                ) : '-'}
+              </td>
+              <td class="ua-cell" title={a.user_agent ?? ''}>{a.uaShort}</td>
+              <td>{new Date(a.accessed_at).toLocaleString('en-US', { timeZone: 'UTC' }) + ' UTC'}</td>
+            </tr>
+          ))}
+          {accessRows.length === 0 && (
+            <tr><td colspan="6" style="text-align:center;color:var(--admin-text-secondary)">No accesses recorded yet</td></tr>
+          )}
+        </tbody>
+      </table>
+      {accessTotalPages > 1 && (
+        <div class="pagination">
+          {page > 1 && <a href={`/admin/visitors?page=${page - 1}`}>Previous</a>}
+          <span>Page {page} of {accessTotalPages}</span>
+          {accessTotalPages > page && <a href={`/admin/visitors?page=${page + 1}`}>Next</a>}
+        </div>
+      )}
+    </div>
+  )}
 </AdminLayout>
 
 <style>
@@ -215,6 +272,20 @@ const fpRaw = fpFilter && guests.length > 0 && guests[0].fingerprint_raw
     background: var(--admin-bg);
     padding: 0.125rem 0.375rem;
     border-radius: 4px;
+  }
+
+  .access-log-note {
+    font-size: 0.8rem;
+    color: var(--admin-text-secondary);
+    margin-bottom: 0.75rem;
+  }
+  .ua-cell {
+    font-size: 0.75rem;
+    color: var(--admin-text-secondary);
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .highlight-row {

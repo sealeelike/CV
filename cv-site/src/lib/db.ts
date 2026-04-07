@@ -1,4 +1,4 @@
-import type { Guest, GuestWithMagicLink, FileRequest, Message, MagicLink } from '../types/index.ts';
+import type { Guest, GuestWithMagicLink, FileRequest, Message, MagicLink, LinkAccessWithMagicLink } from '../types/index.ts';
 
 // ============================================
 // Guests
@@ -77,6 +77,50 @@ export async function getGuestsByFingerprint(
 
 export async function getGuestCountByFingerprint(db: D1Database, fingerprint: string): Promise<number> {
   const row = await db.prepare('SELECT COUNT(*) as count FROM guests WHERE fingerprint = ?').bind(fingerprint).first<{ count: number }>();
+  return row?.count ?? 0;
+}
+
+// ============================================
+// Link Accesses (server-side verify-magic log)
+// ============================================
+export async function insertLinkAccess(
+  db: D1Database,
+  data: {
+    magicLinkId: string;
+    ip?: string;
+    userAgent?: string;
+    geoCountry?: string;
+    geoCity?: string;
+  }
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO link_accesses (magic_link_id, ip, user_agent, geo_country, geo_city)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .bind(data.magicLinkId, data.ip ?? null, data.userAgent ?? null, data.geoCountry ?? null, data.geoCity ?? null)
+    .run();
+}
+
+export async function getLinkAccesses(
+  db: D1Database,
+  limit = 50,
+  offset = 0
+): Promise<LinkAccessWithMagicLink[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT la.*, ml.token AS magic_link_token, ml.label AS magic_link_label
+       FROM link_accesses la
+       LEFT JOIN magic_links ml ON la.magic_link_id = ml.link_id
+       ORDER BY la.accessed_at DESC LIMIT ? OFFSET ?`
+    )
+    .bind(limit, offset)
+    .all<LinkAccessWithMagicLink>();
+  return results;
+}
+
+export async function getLinkAccessCount(db: D1Database): Promise<number> {
+  const row = await db.prepare('SELECT COUNT(*) as count FROM link_accesses').first<{ count: number }>();
   return row?.count ?? 0;
 }
 

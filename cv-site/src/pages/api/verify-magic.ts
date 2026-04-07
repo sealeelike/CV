@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import type { APIRoute } from 'astro';
 import type { ApiResponse } from '../../types/index.ts';
 import { validateMagicLink } from '../../lib/magic-link.ts';
+import { insertLinkAccess } from '../../lib/db.ts';
 
 export const GET: APIRoute = async ({ request, locals, redirect }) => {
   const db = env.DB as D1Database;
@@ -25,6 +26,19 @@ export const GET: APIRoute = async ({ request, locals, redirect }) => {
       </body></html>`,
       { status: 403, headers: { 'Content-Type': 'text/html' } }
     );
+  }
+
+  // Log access server-side before redirect
+  try {
+    await insertLinkAccess(db, {
+      magicLinkId: result.linkId!,
+      ip: request.headers.get('CF-Connecting-IP') ?? undefined,
+      userAgent: request.headers.get('User-Agent') ?? undefined,
+      geoCountry: request.headers.get('CF-IPCountry') ?? undefined,
+      geoCity: request.headers.get('CF-IPCity') ?? undefined,
+    });
+  } catch (e) {
+    console.error('insertLinkAccess failed:', e);
   }
 
   // Set a cookie to indicate valid magic link access

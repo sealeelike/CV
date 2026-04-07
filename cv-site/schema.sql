@@ -69,8 +69,21 @@ CREATE TABLE IF NOT EXISTS assets (
 -- Feature 19: variant assets
 -- ALTER TABLE magic_links ADD COLUMN variant_assets TEXT;
 
+-- 链接访问日志（verify-magic 服务端记录，不依赖客户端 JS）
+CREATE TABLE IF NOT EXISTS link_accesses (
+  access_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  magic_link_id TEXT NOT NULL REFERENCES magic_links(link_id),
+  ip TEXT,
+  user_agent TEXT,
+  geo_country TEXT,
+  geo_city TEXT,
+  accessed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_guests_consent_time ON guests(consent_time);
+CREATE INDEX IF NOT EXISTS idx_link_accesses_magic_link ON link_accesses(magic_link_id);
+CREATE INDEX IF NOT EXISTS idx_link_accesses_time ON link_accesses(accessed_at);
 CREATE INDEX IF NOT EXISTS idx_file_requests_guest ON file_requests(guest_id);
 CREATE INDEX IF NOT EXISTS idx_file_requests_status ON file_requests(status);
 CREATE INDEX IF NOT EXISTS idx_messages_read ON messages(read);

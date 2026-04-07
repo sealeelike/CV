@@ -28,6 +28,21 @@ export interface GuestWithMagicLink extends Guest {
   magic_link_label: string | null;
 }
 
+export interface LinkAccess {
+  access_id: number;
+  magic_link_id: string;
+  ip: string | null;
+  user_agent: string | null;
+  geo_country: string | null;
+  geo_city: string | null;
+  accessed_at: string;
+}
+
+export interface LinkAccessWithMagicLink extends LinkAccess {
+  magic_link_token: string | null;
+  magic_link_label: string | null;
+}
+
 export interface FileRequest {
   request_id: number;
   tracking_code: string | null;
